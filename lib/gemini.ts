@@ -1,7 +1,9 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { supabase, STORAGE_BUCKET, CityImage, TimeOfDay } from "./supabase";
+import { supabase, STORAGE_BUCKET, CityImage, TimeOfDay, AnimationStatus } from "./supabase";
 import { WeatherCategory, getCategoryDescription } from "./weather-categories";
 import { normalizeCity } from "./weather";
+import { generateVideoFromImage } from "./veo";
+import { convertMp4ToGif } from "./ffmpeg";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
 
@@ -142,14 +144,134 @@ export async function getOrGenerateImage(
   city: string,
   weatherCategory: WeatherCategory,
   timeOfDay: TimeOfDay
-): Promise<{ imageUrl: string; cached: boolean }> {
+): Promise<{ imageUrl: string; cached: boolean; animationUrl?: string; animationStatus: AnimationStatus }> {
   // Check for cached image first
   const cached = await getCachedImage(city, weatherCategory, timeOfDay);
   if (cached) {
-    return { imageUrl: cached.image_url, cached: true };
+    return {
+      imageUrl: cached.image_url,
+      cached: true,
+      animationUrl: cached.animation_url,
+      animationStatus: cached.animation_status || "none",
+    };
   }
 
   // Generate new image
   const imageUrl = await generateImage(city, weatherCategory, timeOfDay);
-  return { imageUrl, cached: false };
+  return { imageUrl, cached: false, animationStatus: "none" };
+}
+
+/**
+ * Update animation status in the database
+ */
+export async function updateAnimationStatus(
+  city: string,
+  weatherCategory: WeatherCategory,
+  timeOfDay: TimeOfDay,
+  status: AnimationStatus,
+  animationUrl?: string
+): Promise<void> {
+  const normalizedCity = normalizeCity(city);
+
+  const updateData: { animation_status: AnimationStatus; animation_url?: string } = {
+    animation_status: status,
+  };
+
+  if (animationUrl) {
+    updateData.animation_url = animationUrl;
+  }
+
+  await supabase
+    .from("city_images")
+    .update(updateData)
+    .eq("city", normalizedCity)
+    .eq("weather_category", weatherCategory)
+    .eq("time_of_day", timeOfDay);
+}
+
+/**
+ * Generate animation for an existing image
+ */
+export async function generateAnimation(
+  city: string,
+  weatherCategory: WeatherCategory,
+  timeOfDay: TimeOfDay,
+  imageUrl: string
+): Promise<string> {
+  const normalizedCity = normalizeCity(city);
+
+  // Update status to processing
+  await updateAnimationStatus(city, weatherCategory, timeOfDay, "processing");
+
+  try {
+    // Generate video from image using Veo
+    const videoBuffer = await generateVideoFromImage(imageUrl, weatherCategory, timeOfDay);
+
+    // Convert MP4 to GIF with center crop to 1:1
+    const gifBuffer = await convertMp4ToGif(videoBuffer, {
+      fps: 12,
+      width: 512,
+      cropToSquare: true,
+    });
+
+    // Upload GIF to Supabase Storage
+    const fileName = `${normalizedCity}/${weatherCategory}_${timeOfDay}.gif`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(fileName, gifBuffer, {
+        contentType: "image/gif",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      throw new Error(`Failed to upload animation: ${uploadError.message}`);
+    }
+
+    // Get public URL
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(fileName);
+
+    // Update database with animation URL
+    await updateAnimationStatus(city, weatherCategory, timeOfDay, "completed", publicUrl);
+
+    return publicUrl;
+  } catch (error) {
+    // Update status to failed
+    await updateAnimationStatus(city, weatherCategory, timeOfDay, "failed");
+    throw error;
+  }
+}
+
+/**
+ * Get or generate animation for an image
+ */
+export async function getOrGenerateAnimation(
+  city: string,
+  weatherCategory: WeatherCategory,
+  timeOfDay: TimeOfDay,
+  imageUrl: string
+): Promise<{ animationUrl: string | null; animationStatus: AnimationStatus }> {
+  // Check if animation already exists
+  const cached = await getCachedImage(city, weatherCategory, timeOfDay);
+
+  if (cached?.animation_status === "completed" && cached.animation_url) {
+    return { animationUrl: cached.animation_url, animationStatus: "completed" };
+  }
+
+  if (cached?.animation_status === "processing") {
+    return { animationUrl: null, animationStatus: "processing" };
+  }
+
+  // Start animation generation
+  // Note: This is a long-running operation, so in production you'd want to
+  // handle this asynchronously (e.g., with a job queue)
+  try {
+    const animationUrl = await generateAnimation(city, weatherCategory, timeOfDay, imageUrl);
+    return { animationUrl, animationStatus: "completed" };
+  } catch (error) {
+    console.error("Animation generation failed:", error);
+    return { animationUrl: null, animationStatus: "failed" };
+  }
 }

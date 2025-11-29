@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/auth";
 import { getWeatherForCity, normalizeCity } from "@/lib/weather";
 import { getOrGenerateImage } from "@/lib/gemini";
-import { TimeOfDay } from "@/lib/supabase";
+import { TimeOfDay, AnimationStatus } from "@/lib/supabase";
 
 export interface CityMoodRequest {
   city: string;
@@ -24,6 +24,8 @@ export interface CityMoodResponse {
   };
   imageUrl: string;
   imageCached: boolean;
+  animationUrl?: string;
+  animationStatus: AnimationStatus;
 }
 
 export interface ErrorResponse {
@@ -82,7 +84,7 @@ export async function POST(request: NextRequest) {
     const timeOfDay: TimeOfDay = weather.isDay ? "day" : "night";
 
     // Get or generate image (now includes time of day)
-    const { imageUrl, cached: imageCached } = await getOrGenerateImage(
+    const { imageUrl, cached: imageCached, animationUrl, animationStatus } = await getOrGenerateImage(
       city,
       weather.category,
       timeOfDay
@@ -104,6 +106,8 @@ export async function POST(request: NextRequest) {
       },
       imageUrl,
       imageCached,
+      animationUrl,
+      animationStatus,
     };
 
     return NextResponse.json<CityMoodResponse>(response);

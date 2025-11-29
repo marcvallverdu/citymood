@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import type { CityMoodResponse, ErrorResponse } from "@/app/api/city-mood/route";
 import type { CachedCity } from "@/app/api/cached-cities/route";
+import type { AnimationStatus } from "@/lib/supabase";
 
 export default function CityMoodForm() {
   const [city, setCity] = useState("");
@@ -10,6 +11,8 @@ export default function CityMoodForm() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CityMoodResponse | null>(null);
   const [cachedCities, setCachedCities] = useState<CachedCity[]>([]);
+  const [showAnimation, setShowAnimation] = useState(true);
+  const [generatingAnimation, setGeneratingAnimation] = useState(false);
 
   useEffect(() => {
     fetchCachedCities();
@@ -76,8 +79,51 @@ export default function CityMoodForm() {
       },
       imageUrl: cached.image_url,
       imageCached: true,
+      animationUrl: cached.animation_url,
+      animationStatus: cached.animation_status || "none",
     });
     setError(null);
+  };
+
+  const handleGenerateAnimation = async () => {
+    if (!result) return;
+
+    setGeneratingAnimation(true);
+    try {
+      const response = await fetch("/api/generate-animation", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY}`,
+        },
+        body: JSON.stringify({
+          city: result.city,
+          weatherCategory: result.weather.category,
+          timeOfDay: result.weather.timeOfDay,
+          imageUrl: result.imageUrl,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Animation generation failed");
+      }
+
+      // Update result with animation data
+      setResult({
+        ...result,
+        animationUrl: data.animationUrl,
+        animationStatus: data.animationStatus,
+      });
+
+      // Refresh cached cities
+      fetchCachedCities();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Animation generation failed");
+    } finally {
+      setGeneratingAnimation(false);
+    }
   };
 
   const getTimeIcon = (timeOfDay: string) => {
@@ -97,6 +143,23 @@ export default function CityMoodForm() {
     };
     return icons[category] || "🌤️";
   };
+
+  const getAnimationStatusBadge = (status: AnimationStatus) => {
+    const badges: Record<AnimationStatus, { text: string; color: string }> = {
+      none: { text: "No Animation", color: "bg-gray-500" },
+      pending: { text: "Pending", color: "bg-yellow-500" },
+      processing: { text: "Processing...", color: "bg-blue-500" },
+      completed: { text: "Animated", color: "bg-green-500" },
+      failed: { text: "Failed", color: "bg-red-500" },
+    };
+    return badges[status] || badges.none;
+  };
+
+  const displayUrl = result
+    ? showAnimation && result.animationUrl && result.animationStatus === "completed"
+      ? result.animationUrl
+      : result.imageUrl
+    : null;
 
   return (
     <div className="w-full max-w-2xl mx-auto">
@@ -141,6 +204,7 @@ export default function CityMoodForm() {
                 className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full capitalize transition-colors flex items-center gap-1"
               >
                 {getTimeIcon(cached.time_of_day)} {cached.city} ({cached.weather_category})
+                {cached.animation_status === "completed" && " 🎬"}
               </button>
             ))}
           </div>
@@ -157,7 +221,7 @@ export default function CityMoodForm() {
         <div className="mt-6">
           <div className="relative aspect-square w-full overflow-hidden rounded-xl shadow-lg">
             <img
-              src={result.imageUrl}
+              src={displayUrl || result.imageUrl}
               alt={`${result.city} in ${result.weather.category} weather (${result.weather.timeOfDay})`}
               className="w-full h-full object-cover"
             />
@@ -187,15 +251,69 @@ export default function CityMoodForm() {
               </div>
             </div>
 
-            {/* Cached badge at top right */}
-            {result.imageCached && (
-              <div className="absolute top-3 right-3">
+            {/* Badges at top right */}
+            <div className="absolute top-3 right-3 flex flex-col gap-2">
+              {result.imageCached && (
                 <span className="px-2 py-1 bg-green-500 text-white text-xs font-medium rounded">
                   Cached
                 </span>
+              )}
+              {result.animationStatus && result.animationStatus !== "none" && (
+                <span className={`px-2 py-1 ${getAnimationStatusBadge(result.animationStatus).color} text-white text-xs font-medium rounded`}>
+                  {getAnimationStatusBadge(result.animationStatus).text}
+                </span>
+              )}
+            </div>
+
+            {/* Animation toggle at top left */}
+            {result.animationUrl && result.animationStatus === "completed" && (
+              <div className="absolute top-3 left-3">
+                <button
+                  onClick={() => setShowAnimation(!showAnimation)}
+                  className="px-3 py-1.5 bg-black/50 backdrop-blur-sm text-white text-sm font-medium rounded-full hover:bg-black/70 transition-colors"
+                >
+                  {showAnimation ? "📷 Static" : "🎬 Animated"}
+                </button>
               </div>
             )}
           </div>
+
+          {/* Generate Animation button */}
+          {result.animationStatus === "none" && (
+            <button
+              onClick={handleGenerateAnimation}
+              disabled={generatingAnimation}
+              className="mt-4 w-full py-3 px-4 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors duration-200"
+            >
+              {generatingAnimation ? "Generating Animation..." : "🎬 Generate Animation"}
+            </button>
+          )}
+
+          {result.animationStatus === "failed" && (
+            <button
+              onClick={handleGenerateAnimation}
+              disabled={generatingAnimation}
+              className="mt-4 w-full py-3 px-4 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors duration-200"
+            >
+              {generatingAnimation ? "Retrying..." : "🔄 Retry Animation"}
+            </button>
+          )}
+
+          {generatingAnimation && (
+            <div className="mt-4 p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+              <div className="flex items-center gap-3">
+                <div className="w-6 h-6 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin"></div>
+                <div>
+                  <p className="text-purple-600 dark:text-purple-400 font-medium">
+                    Generating animation...
+                  </p>
+                  <p className="text-sm text-purple-500 dark:text-purple-500">
+                    This may take up to 2-3 minutes
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

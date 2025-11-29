@@ -46,6 +46,8 @@ export interface WeatherCache {
 
 export type TimeOfDay = "day" | "night";
 
+export type AnimationStatus = "none" | "pending" | "processing" | "completed" | "failed";
+
 export interface CityImage {
   id: string;
   city: string;
@@ -53,6 +55,8 @@ export interface CityImage {
   time_of_day: TimeOfDay;
   image_url: string;
   prompt_used: string;
+  animation_url?: string;
+  animation_status: AnimationStatus;
   created_at: string;
 }
 
