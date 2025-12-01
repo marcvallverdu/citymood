@@ -9,7 +9,7 @@ const ANIMATION_EFFECTS: Record<WeatherCategory, string> = {
   cloudy: "slow clouds drifting across the sky, soft light changes",
   foggy: "wisps of fog gently drifting through the scene, atmospheric haze moving",
   drizzle: "light rain particles falling gently, small ripples in puddles",
-  rainy: "rain falling steadily, puddles rippling, water drops on surfaces",
+  rainy: "rain falling steadily, water drops on surfaces",
   snowy: "snowflakes drifting down gently, snow accumulating softly",
   sleet: "mixed precipitation falling, icy particles bouncing",
   stormy: "dramatic clouds moving, lightning flashes, heavy rain",

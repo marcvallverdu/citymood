@@ -11,7 +11,7 @@ import { ImageModel, IMAGE_MODELS, VideoModel } from "./models";
 // Image prompt template with time of day
 const PROMPT_TEMPLATE = `Create a highly detailed miniature diorama of {CITY} in isometric 3D view, placed on a thick textured platform base with rounded edges. Feature the city's most iconic landmarks and architectural elements as detailed miniature models. The scene should look like a collectible tabletop diorama with realistic depth and scale.
 
-Style: lear, 45° top-down isometric miniature 3D cartoon scene, detailed miniature models, warm lighting, soft shadows, high-quality 3D render with PBR materials.
+Style: clear, 45° top-down isometric miniature 3D cartoon scene, detailed miniature models, warm lighting, soft shadows, high-quality 3D render with PBR materials.
 
 Weather and time: {WEATHER} {TIME_OF_DAY} atmosphere - integrate weather effects naturally (clouds, lighting mood, sky color).
 
