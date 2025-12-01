@@ -15,7 +15,9 @@
     "fluent-ffmpeg": "^2.1.3",
     "next": "16.0.5",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "recharts": "^3.5.1",
+    "workflow": "^4.0.1-beta.22"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
