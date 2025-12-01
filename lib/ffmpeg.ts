@@ -75,8 +75,16 @@ export const convertMp4ToGif = convertMp4ToApng;
 /**
  * Create a boomerang (ping-pong) effect on an MP4 video
  * Concatenates the video with a reversed copy for seamless looping
+ * Returns the original buffer if FFmpeg is not available (e.g., on Vercel)
  */
 export async function createBoomerangMp4(mp4Buffer: Buffer): Promise<Buffer> {
+  // Check if FFmpeg is available first
+  const ffmpegAvailable = await checkFfmpegAvailable();
+  if (!ffmpegAvailable) {
+    console.log("FFmpeg not available, skipping boomerang effect");
+    return mp4Buffer; // Return original video without boomerang
+  }
+
   const tempDir = await mkdtemp(join(tmpdir(), "citymood-"));
   const inputPath = join(tempDir, "input.mp4");
   const outputPath = join(tempDir, "output.mp4");
