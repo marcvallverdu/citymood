@@ -2,10 +2,9 @@
 
 ## Overview
 
-The CityMood API generates weather-themed animated videos for any city in the world.
-Videos are generated asynchronously - submit a job and poll for completion.
+The CityMood API provides weather data and generates weather-themed AI images and animated videos for any city in the world. Images and videos are generated asynchronously - submit a job and poll for completion.
 
-**Base URL:** `https://your-domain.com/api/v1`
+**Base URL:** `https://citymood-production.up.railway.app/api/v1`
 
 ## Authentication
 
@@ -19,11 +18,24 @@ To get an API key, register your device using the `/register` endpoint.
 
 ## Rate Limits
 
-- **Standard keys:** 1 active job at a time
+- **Standard keys:** 1 active job at a time per endpoint type
 - **Admin keys:** Unlimited concurrent jobs
 
 If you submit a new job while one is in progress, you'll receive a 429 response
 with the existing job_id so you can continue polling it.
+
+---
+
+## Endpoints Overview
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/register` | POST | Register device and get API key |
+| `/city-weather` | GET | Get current weather for a city (synchronous) |
+| `/city-image` | POST | Generate AI image for a city's weather |
+| `/city-image/:jobId` | GET | Check image generation status |
+| `/city-video` | POST | Generate animated video for a city's weather |
+| `/city-video/:jobId` | GET | Check video generation status |
 
 ---
 
@@ -48,7 +60,7 @@ Register a device to receive an API key. If the device is already registered, re
 #### Example Request
 
 ```bash
-curl -X POST https://your-domain.com/api/v1/register \
+curl -X POST https://citymood-production.up.railway.app/api/v1/register \
   -H "Content-Type: application/json" \
   -d '{"device_id": "550e8400-e29b-41d4-a716-446655440000", "device_name": "iPhone 15 Pro", "app_version": "1.0.0"}'
 ```
@@ -79,11 +91,65 @@ Same format as above. If the device was already registered, returns the existing
 
 ---
 
-### Submit Job
+### Get Weather
 
-**POST** `/city-video`
+**GET** `/city-weather`
 
-Start generating a video for a city. Returns immediately with a job ID.
+Get current weather data for a city. This is a synchronous endpoint - returns immediately.
+Weather data is cached for 1 hour.
+
+#### Query Parameters
+
+| Parameter | Type   | Required | Description                                    |
+| --------- | ------ | -------- | ---------------------------------------------- |
+| city      | string | Yes      | City name (e.g., "Paris")                      |
+| country   | string | No       | Country for disambiguation (e.g., "France")   |
+
+#### Example Request
+
+```bash
+curl "https://citymood-production.up.railway.app/api/v1/city-weather?city=Paris&country=France" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+#### Response (200 OK)
+
+```json
+{
+  "success": true,
+  "data": {
+    "city": "Paris",
+    "country": "France",
+    "weather": {
+      "category": "cloudy",
+      "description": "Partly Cloudy",
+      "temperature_c": 12.5,
+      "temperature_f": 54.5,
+      "humidity": 76,
+      "wind_kph": 15.2,
+      "is_day": true
+    },
+    "cached": true
+  },
+  "meta": {
+    "request_id": "550e8400-e29b-41d4-a716-446655440000",
+    "processing_time_ms": 95
+  }
+}
+```
+
+The `cached` field indicates whether the weather data was served from cache (`true`) or freshly fetched (`false`).
+
+---
+
+### Submit Image Job
+
+**POST** `/city-image`
+
+Generate an AI image that captures the mood of a city based on its current weather.
+Returns immediately with a job ID - poll the status endpoint for completion.
+
+Images are cached by city + weather category + time of day.
 
 #### Request Body
 
@@ -95,7 +161,129 @@ Start generating a video for a city. Returns immediately with a job ID.
 #### Example Request
 
 ```bash
-curl -X POST https://your-domain.com/api/v1/city-video \
+curl -X POST "https://citymood-production.up.railway.app/api/v1/city-image" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"city": "Paris", "country": "France"}'
+```
+
+#### Response (202 Accepted)
+
+```json
+{
+  "success": true,
+  "data": {
+    "job_id": "job_img_abc123",
+    "status": "pending",
+    "status_url": "/api/v1/city-image/job_img_abc123",
+    "estimated_time_seconds": 15
+  },
+  "meta": {
+    "request_id": "550e8400-e29b-41d4-a716-446655440000",
+    "processing_time_ms": 42
+  }
+}
+```
+
+---
+
+### Check Image Job Status
+
+**GET** `/city-image/:jobId`
+
+Check the status of an image generation job.
+
+#### Example Request
+
+```bash
+curl "https://citymood-production.up.railway.app/api/v1/city-image/job_img_abc123" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+#### Response (Processing)
+
+```json
+{
+  "success": true,
+  "data": {
+    "job_id": "job_img_abc123",
+    "status": "processing",
+    "stage": "generating_image",
+    "progress": {
+      "current_step": 2,
+      "total_steps": 2,
+      "message": "Creating your city mood image..."
+    }
+  },
+  "meta": {
+    "request_id": "550e8400-e29b-41d4-a716-446655440001",
+    "processing_time_ms": 12
+  }
+}
+```
+
+#### Response (Completed)
+
+```json
+{
+  "success": true,
+  "data": {
+    "job_id": "job_img_abc123",
+    "status": "completed",
+    "result": {
+      "city": "Paris",
+      "country": "France",
+      "image_url": "https://storage.example.com/paris/cloudy_day.png",
+      "weather": {
+        "category": "cloudy",
+        "description": "Partly Cloudy",
+        "temperature_c": 12.5,
+        "temperature_f": 54.5,
+        "humidity": 76,
+        "wind_kph": 15.2,
+        "is_day": true
+      },
+      "generated_at": "2025-12-01T14:30:00.000Z",
+      "cached": false
+    }
+  },
+  "meta": {
+    "request_id": "550e8400-e29b-41d4-a716-446655440002",
+    "processing_time_ms": 8
+  }
+}
+```
+
+#### Image Processing Stages
+
+| Stage              | Step | Description                        |
+| ------------------ | ---- | ---------------------------------- |
+| fetching_weather   | 1/2  | Fetching current weather data      |
+| generating_image   | 2/2  | Creating city mood image with AI   |
+
+---
+
+### Submit Video Job
+
+**POST** `/city-video`
+
+Generate an animated video that brings the city's weather mood to life.
+Returns immediately with a job ID - poll the status endpoint for completion.
+
+Videos are cached by city + weather category + time of day. The video endpoint
+automatically generates the base image if one doesn't exist for the current conditions.
+
+#### Request Body
+
+| Field   | Type   | Required | Description                                    |
+| ------- | ------ | -------- | ---------------------------------------------- |
+| city    | string | Yes      | City name (e.g., "Paris")                      |
+| country | string | No       | Country for disambiguation (e.g., "France")   |
+
+#### Example Request
+
+```bash
+curl -X POST https://citymood-production.up.railway.app/api/v1/city-video \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"city": "Paris", "country": "France"}'
@@ -121,7 +309,7 @@ curl -X POST https://your-domain.com/api/v1/city-video \
 
 ---
 
-### Check Job Status
+### Check Video Job Status
 
 **GET** `/city-video/:jobId`
 
@@ -130,7 +318,7 @@ Check the status of a video generation job.
 #### Example Request
 
 ```bash
-curl https://your-domain.com/api/v1/city-video/job_abc123xyz \
+curl https://citymood-production.up.railway.app/api/v1/city-video/job_abc123xyz \
   -H "Authorization: Bearer YOUR_API_KEY"
 ```
 
@@ -211,12 +399,53 @@ curl https://your-domain.com/api/v1/city-video/job_abc123xyz \
 
 ## Processing Stages
 
+### Image Generation (2 stages)
+
+| Stage              | Step | Description                        |
+| ------------------ | ---- | ---------------------------------- |
+| fetching_weather   | 1/2  | Fetching current weather data      |
+| generating_image   | 2/2  | Creating city mood image with AI   |
+
+### Video Generation (4 stages)
+
 | Stage              | Step | Description                        |
 | ------------------ | ---- | ---------------------------------- |
 | fetching_weather   | 1/4  | Fetching current weather data      |
 | generating_image   | 2/4  | Creating city diorama image        |
 | generating_video   | 3/4  | Animating weather effects          |
 | processing_video   | 4/4  | Finalizing video loop              |
+
+---
+
+## Caching
+
+CityMood uses multi-level caching for fast responses and cost efficiency.
+
+### Cache Durations
+
+| Resource | Cache Duration | Cache Key |
+|----------|----------------|-----------|
+| Weather  | 1 hour         | City name (normalized) |
+| Images   | Indefinite     | City + weather category + time of day |
+| Videos   | Indefinite     | City + weather category + time of day |
+
+### How Caching Works
+
+1. **Weather**: Fresh weather is fetched from the weather API and cached for 1 hour
+2. **Images**: When you request an image, we check if one exists for the city's current weather category and time of day
+3. **Videos**: Same as images - cached by city + weather category + time of day
+
+### Cache Indicators
+
+All responses include a `cached` field:
+- `cached: true` - Result served from cache (fast, typically < 100ms)
+- `cached: false` - Result freshly generated
+
+### Cache Invalidation
+
+- Weather cache expires after 1 hour automatically
+- Images/videos are regenerated when weather category changes (e.g., sunny → rainy)
+- Images/videos are regenerated when time of day changes (day → night)
 
 ---
 
@@ -244,7 +473,7 @@ curl https://your-domain.com/api/v1/city-video/job_abc123xyz \
 
 ```typescript
 const API_KEY = 'your-api-key';
-const BASE_URL = 'https://your-domain.com/api/v1';
+const BASE_URL = 'https://citymood-production.up.railway.app/api/v1';
 
 async function generateCityVideo(city: string, country?: string) {
   // 1. Submit the job
@@ -304,7 +533,7 @@ import requests
 import time
 
 API_KEY = 'your-api-key'
-BASE_URL = 'https://your-domain.com/api/v1'
+BASE_URL = 'https://citymood-production.up.railway.app/api/v1'
 
 def generate_city_video(city: str, country: str = None):
     headers = {
@@ -357,7 +586,7 @@ print(f"Video URL: {result['video_url']}")
 import Foundation
 
 class CityMoodAPI {
-    private let baseURL = "https://your-domain.com/api/v1"
+    private let baseURL = "https://citymood-production.up.railway.app/api/v1"
     private var apiKey: String?
 
     // Get device ID (persists across app reinstalls)
@@ -519,7 +748,7 @@ Task {
 #!/bin/bash
 
 API_KEY="your-api-key"
-BASE_URL="https://your-domain.com/api/v1"
+BASE_URL="https://citymood-production.up.railway.app/api/v1"
 
 # Submit job
 RESPONSE=$(curl -s -X POST "$BASE_URL/city-video" \

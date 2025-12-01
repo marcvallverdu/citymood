@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { start } from "workflow/api";
 import { validateApiKeyAsync } from "@/lib/auth";
 import { createJob, getActiveJobForApiKey } from "@/lib/jobs";
-import { cityVideoWorkflow } from "@/workflows/city-video-workflow";
+import { cityImageWorkflow } from "@/workflows/city-image-workflow";
 import {
   generateRequestId,
   createErrorResponse,
@@ -11,17 +11,11 @@ import {
 
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
 
-/**
- * Request body interface
- */
-interface CityVideoRequest {
+interface CityImageRequest {
   city: string;
   country?: string;
 }
 
-/**
- * Job submission response data
- */
 interface JobSubmitData {
   job_id: string;
   status: "pending";
@@ -30,9 +24,9 @@ interface JobSubmitData {
 }
 
 /**
- * POST /api/v1/city-video
+ * POST /api/v1/city-image
  *
- * Submit a video generation job for a city.
+ * Submit an image generation job for a city.
  * Returns immediately with a job_id that can be polled for status.
  *
  * Rate limited to 1 active job per API key (admin keys exempt).
@@ -65,7 +59,7 @@ export async function POST(request: NextRequest) {
           "You already have an active job in progress. Please wait for it to complete or poll its status.",
           {
             active_job_id: activeJobId,
-            status_url: `/api/v1/city-video/${activeJobId}`,
+            status_url: `/api/v1/city-image/${activeJobId}`,
           }
         );
       }
@@ -76,7 +70,7 @@ export async function POST(request: NextRequest) {
   }
 
   // 3. Parse request body
-  let body: CityVideoRequest;
+  let body: CityImageRequest;
   try {
     body = await request.json();
   } catch {
@@ -119,7 +113,7 @@ export async function POST(request: NextRequest) {
   // 5. Create job in database
   let jobId: string;
   try {
-    jobId = await createJob(apiKey, city, country, "video");
+    jobId = await createJob(apiKey, city, country, "image");
   } catch (error) {
     console.error("Failed to create job:", error);
     return createErrorResponse(
@@ -131,7 +125,7 @@ export async function POST(request: NextRequest) {
 
   // 6. Start workflow (durable, will survive restarts)
   try {
-    await start(cityVideoWorkflow, [{ jobId, city, country }]);
+    await start(cityImageWorkflow, [{ jobId, city, country }]);
   } catch (error) {
     console.error(`Failed to start workflow for job ${jobId}:`, error);
     // Job is created but workflow didn't start - it will be in pending state
@@ -142,8 +136,8 @@ export async function POST(request: NextRequest) {
   const responseData: JobSubmitData = {
     job_id: jobId,
     status: "pending",
-    status_url: `/api/v1/city-video/${jobId}`,
-    estimated_time_seconds: 60,
+    status_url: `/api/v1/city-image/${jobId}`,
+    estimated_time_seconds: 15,
   };
 
   const processingTimeMs = Date.now() - startTime;

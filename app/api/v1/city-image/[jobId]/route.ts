@@ -9,18 +9,12 @@ import {
 
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
 
-/**
- * Progress information for processing jobs
- */
 interface JobProgress {
   current_step: number;
   total_steps: number;
   message: string;
 }
 
-/**
- * Response for pending/processing jobs
- */
 interface JobStatusData {
   job_id: string;
   status: "pending" | "processing";
@@ -28,16 +22,13 @@ interface JobStatusData {
   progress?: JobProgress;
 }
 
-/**
- * Response for completed jobs
- */
 interface JobCompletedData {
   job_id: string;
   status: "completed";
   result: {
     city: string;
     country: string;
-    video_url: string;
+    image_url: string;
     weather: {
       category: string;
       description: string;
@@ -52,10 +43,8 @@ interface JobCompletedData {
   };
 }
 
-/**
- * Build the response based on job status
- */
 function buildJobResponse(job: VideoJob): JobStatusData | JobCompletedData {
+  // For image jobs, video_url contains the image URL
   if (job.status === "completed" && job.video_url && job.weather_data) {
     return {
       job_id: job.id,
@@ -63,7 +52,7 @@ function buildJobResponse(job: VideoJob): JobStatusData | JobCompletedData {
       result: {
         city: job.city,
         country: job.country || "",
-        video_url: job.video_url,
+        image_url: job.video_url, // For image jobs, this holds the image URL
         weather: {
           category: job.weather_data.category,
           description: job.weather_data.conditionText,
@@ -90,7 +79,8 @@ function buildJobResponse(job: VideoJob): JobStatusData | JobCompletedData {
     response.stage = job.stage;
     response.progress = {
       current_step: stageInfo.step,
-      total_steps: stageInfo.total,
+      // Image jobs only have 2 steps
+      total_steps: 2,
       message: stageInfo.message,
     };
   }
@@ -99,9 +89,9 @@ function buildJobResponse(job: VideoJob): JobStatusData | JobCompletedData {
 }
 
 /**
- * GET /api/v1/city-video/:jobId
+ * GET /api/v1/city-image/:jobId
  *
- * Check the status of a video generation job.
+ * Check the status of an image generation job.
  * Returns progress information for pending/processing jobs.
  * Returns the full result for completed jobs.
  * Returns error details for failed jobs.
@@ -164,7 +154,7 @@ export async function GET(
     return createErrorResponse(
       requestId,
       "VIDEO_GENERATION_FAILED",
-      job.error_message || "Video generation failed",
+      job.error_message || "Image generation failed",
       { job_id: job.id, stage: job.stage }
     );
   }

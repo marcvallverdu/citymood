@@ -16,6 +16,8 @@ export type JobStage =
   | "generating_video"
   | "processing_video";
 
+export type JobType = "image" | "video";
+
 /**
  * Stage metadata for progress reporting
  */
@@ -34,12 +36,14 @@ export interface VideoJob {
   api_key_hash: string;
   status: JobStatus;
   stage: JobStage | null;
+  job_type: JobType;
   city: string;
   country: string | null;
   weather_data: WeatherData | null;
   image_url: string | null;
   video_url: string | null;
   error_message: string | null;
+  cached: boolean;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -66,7 +70,8 @@ export function hashApiKey(apiKey: string): string {
 export async function createJob(
   apiKey: string,
   city: string,
-  country?: string
+  country?: string,
+  jobType: JobType = "video"
 ): Promise<string> {
   const jobId = generateJobId();
   const apiKeyHash = hashApiKey(apiKey);
@@ -75,6 +80,7 @@ export async function createJob(
     id: jobId,
     api_key_hash: apiKeyHash,
     status: "pending",
+    job_type: jobType,
     city,
     country: country || null,
   });
@@ -191,7 +197,8 @@ export async function completeJob(
   jobId: string,
   videoUrl: string,
   weatherData: WeatherData,
-  imageUrl: string
+  imageUrl: string,
+  cached: boolean = false
 ): Promise<void> {
   const { error } = await supabase
     .from("video_jobs")
@@ -201,6 +208,7 @@ export async function completeJob(
       video_url: videoUrl,
       weather_data: weatherData,
       image_url: imageUrl,
+      cached,
       updated_at: new Date().toISOString(),
       completed_at: new Date().toISOString(),
     })
