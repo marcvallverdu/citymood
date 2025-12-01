@@ -6,6 +6,8 @@ import type { CachedCity } from "@/app/api/cached-cities/route";
 import type { AnimationStatus } from "@/lib/supabase";
 import { IMAGE_MODELS, VIDEO_MODELS, type ImageModel, type VideoModel } from "@/lib/models";
 
+const API_KEY_STORAGE_KEY = "citymood_api_key";
+
 export default function CityMoodForm() {
   const [city, setCity] = useState("");
   const [loading, setLoading] = useState(false);
@@ -18,13 +20,56 @@ export default function CityMoodForm() {
   const [imageModel, setImageModel] = useState<ImageModel>("nano-banana");
   const [videoModel, setVideoModel] = useState<VideoModel>("seedance");
 
+  // API key state
+  const [apiKey, setApiKey] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [saveApiKey, setSaveApiKey] = useState(true);
+
+  // Load API key from localStorage on mount
   useEffect(() => {
-    fetchCachedCities();
+    const savedKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+    if (savedKey) {
+      setApiKey(savedKey);
+    }
   }, []);
 
+  // Save/remove API key from localStorage when saveApiKey changes
+  const handleApiKeyChange = (value: string) => {
+    setApiKey(value);
+    if (saveApiKey && value) {
+      localStorage.setItem(API_KEY_STORAGE_KEY, value);
+    }
+  };
+
+  const handleSaveToggle = (checked: boolean) => {
+    setSaveApiKey(checked);
+    if (checked && apiKey) {
+      localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
+    } else {
+      localStorage.removeItem(API_KEY_STORAGE_KEY);
+    }
+  };
+
+  const clearApiKey = () => {
+    setApiKey("");
+    localStorage.removeItem(API_KEY_STORAGE_KEY);
+  };
+
+  // Fetch cached cities when API key is available
+  useEffect(() => {
+    if (apiKey) {
+      fetchCachedCities();
+    }
+  }, [apiKey]);
+
   const fetchCachedCities = async () => {
+    if (!apiKey) return;
     try {
-      const response = await fetch("/api/cached-cities");
+      const response = await fetch("/api/cached-cities", {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      });
       if (response.ok) {
         const data = await response.json();
         setCachedCities(data);
@@ -45,7 +90,7 @@ export default function CityMoodForm() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({ city, imageModel }),
       });
@@ -98,7 +143,7 @@ export default function CityMoodForm() {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           city: cached.city,
@@ -135,7 +180,7 @@ export default function CityMoodForm() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           city: result.city,
@@ -210,6 +255,64 @@ export default function CityMoodForm() {
 
   return (
     <div className="w-full max-w-2xl mx-auto">
+      {/* API Key Section */}
+      <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between mb-2">
+          <label
+            htmlFor="apiKey"
+            className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+          >
+            API Key
+          </label>
+          {apiKey && (
+            <button
+              type="button"
+              onClick={clearApiKey}
+              className="text-xs text-red-500 hover:text-red-600 dark:text-red-400"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <input
+              type={showApiKey ? "text" : "password"}
+              id="apiKey"
+              value={apiKey}
+              onChange={(e) => handleApiKeyChange(e.target.value)}
+              placeholder="Enter your API key"
+              className="w-full px-4 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-800 dark:text-white font-mono text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => setShowApiKey(!showApiKey)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              title={showApiKey ? "Hide API key" : "Show API key"}
+            >
+              {showApiKey ? "🙈" : "👁️"}
+            </button>
+          </div>
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="saveApiKey"
+            checked={saveApiKey}
+            onChange={(e) => handleSaveToggle(e.target.checked)}
+            className="rounded border-gray-300 dark:border-gray-600"
+          />
+          <label htmlFor="saveApiKey" className="text-xs text-gray-500 dark:text-gray-400">
+            Save to browser (localStorage)
+          </label>
+        </div>
+        {!apiKey && (
+          <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+            ⚠️ API key required to use the app
+          </p>
+        )}
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label
@@ -274,10 +377,10 @@ export default function CityMoodForm() {
 
         <button
           type="submit"
-          disabled={loading || !city.trim()}
+          disabled={loading || !city.trim() || !apiKey}
           className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors duration-200"
         >
-          {loading ? "Generating..." : "Get City Mood"}
+          {loading ? "Generating..." : !apiKey ? "Enter API Key" : "Get City Mood"}
         </button>
       </form>
 

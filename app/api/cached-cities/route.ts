@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase, STORAGE_BUCKET, TimeOfDay, AnimationStatus } from "@/lib/supabase";
-import { validateApiKey } from "@/lib/auth";
+import {
+  supabase,
+  STORAGE_BUCKET,
+  TimeOfDay,
+  AnimationStatus,
+} from "@/lib/supabase";
+import { validateApiKeyAsync } from "@/lib/auth";
 
 export interface CachedCity {
   city: string;
@@ -13,10 +18,21 @@ export interface CachedCity {
   created_at: string;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // Require authentication to prevent enumeration attacks
+  const authResult = await validateApiKeyAsync(request);
+  if (!authResult.valid) {
+    return NextResponse.json(
+      { error: authResult.error || "Unauthorized" },
+      { status: 401 }
+    );
+  }
+
   const { data, error } = await supabase
     .from("city_images")
-    .select("city, weather_category, time_of_day, image_url, animation_url, video_url, animation_status, created_at")
+    .select(
+      "city, weather_category, time_of_day, image_url, animation_url, video_url, animation_status, created_at"
+    )
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -28,9 +44,12 @@ export async function GET() {
 
 export async function DELETE(request: NextRequest) {
   // Validate API key
-  const authResult = validateApiKey(request);
+  const authResult = await validateApiKeyAsync(request);
   if (!authResult.valid) {
-    return NextResponse.json({ error: authResult.error! }, { status: 401 });
+    return NextResponse.json(
+      { error: authResult.error || "Unauthorized" },
+      { status: 401 }
+    );
   }
 
   // Parse request body

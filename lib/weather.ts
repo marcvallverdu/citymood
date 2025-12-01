@@ -15,6 +15,8 @@ export interface WeatherData {
   windKph: number;
   isDay: boolean;
   cached: boolean;
+  locationName?: string;
+  country?: string;
 }
 
 interface WeatherAPIResponse {
@@ -125,5 +127,7 @@ export async function getWeatherForCity(city: string): Promise<WeatherData> {
     windKph: data.current.wind_kph,
     isDay: data.current.is_day === 1,
     cached: false,
+    locationName: data.location.name,
+    country: data.location.country,
   };
 }

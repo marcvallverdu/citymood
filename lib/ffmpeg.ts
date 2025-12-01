@@ -73,6 +73,37 @@ export async function convertMp4ToApng(
 export const convertMp4ToGif = convertMp4ToApng;
 
 /**
+ * Create a boomerang (ping-pong) effect on an MP4 video
+ * Concatenates the video with a reversed copy for seamless looping
+ */
+export async function createBoomerangMp4(mp4Buffer: Buffer): Promise<Buffer> {
+  const tempDir = await mkdtemp(join(tmpdir(), "citymood-"));
+  const inputPath = join(tempDir, "input.mp4");
+  const outputPath = join(tempDir, "output.mp4");
+
+  try {
+    await writeFile(inputPath, mp4Buffer);
+
+    // Use filter_complex to split, reverse, and concatenate
+    // [0:v] = input video stream
+    // split creates two copies [a][b]
+    // [b] is reversed
+    // concat joins them together
+    const cmd = `ffmpeg -y -i "${inputPath}" -filter_complex "[0:v]split[a][b];[b]reverse[r];[a][r]concat=n=2:v=1:a=0" -an "${outputPath}"`;
+    await execAsync(cmd);
+
+    return await readFile(outputPath);
+  } finally {
+    try {
+      await unlink(inputPath);
+      await unlink(outputPath);
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
+}
+
+/**
  * Check if ffmpeg is available on the system
  */
 export async function checkFfmpegAvailable(): Promise<boolean> {

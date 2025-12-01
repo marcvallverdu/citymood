@@ -3,7 +3,7 @@ import { supabase, STORAGE_BUCKET, CityImage, TimeOfDay, AnimationStatus } from 
 import { WeatherCategory, getCategoryDescription } from "./weather-categories";
 import { normalizeCity } from "./weather";
 import { generateVideoFromImage } from "./veo";
-import { convertMp4ToApng } from "./ffmpeg";
+import { convertMp4ToApng, createBoomerangMp4 } from "./ffmpeg";
 import { ImageModel, IMAGE_MODELS, VideoModel } from "./models";
 
 
@@ -263,7 +263,10 @@ export async function generateAnimation(
 
   try {
     // Generate video from image using selected model
-    const videoBuffer = await generateVideoFromImage(imageUrl, weatherCategory, timeOfDay, videoModel);
+    const rawVideoBuffer = await generateVideoFromImage(imageUrl, weatherCategory, timeOfDay, videoModel);
+
+    // Create boomerang effect (forward + reverse) for seamless looping
+    const videoBuffer = await createBoomerangMp4(rawVideoBuffer);
 
     // Upload raw MP4 to Supabase Storage first (for quality comparison)
     const mp4FileName = `${normalizedCity}/${weatherCategory}_${timeOfDay}.mp4`;
