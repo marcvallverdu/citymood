@@ -94,6 +94,8 @@ export async function getWeatherForCity(city: string): Promise<WeatherData> {
   const data: WeatherAPIResponse = await response.json();
   const category = getWeatherCategory(data.current.condition.code);
 
+  console.log(`[Weather] ${city}: ${data.current.condition.text} (code ${data.current.condition.code}) → category: ${category}, temp: ${data.current.temp_c}°C, isDay: ${data.current.is_day}`);
+
   const weatherData = {
     condition_code: data.current.condition.code,
     condition_text: data.current.condition.text,

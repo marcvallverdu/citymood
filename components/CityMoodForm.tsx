@@ -111,14 +111,15 @@ export default function CityMoodForm() {
     }
   };
 
-  const handleCachedClick = (cached: CachedCity) => {
+  const handleCachedClick = async (cached: CachedCity) => {
+    // Set initial result with cached image
     setResult({
       city: cached.city,
       normalizedCity: cached.city,
       weather: {
         category: cached.weather_category,
         description: cached.weather_category,
-        temperature: 0,
+        temperature: 0, // Will be updated with fresh weather
         temperatureF: 0,
         humidity: 0,
         windKph: 0,
@@ -133,6 +134,29 @@ export default function CityMoodForm() {
       animationStatus: cached.animation_status || "none",
     });
     setError(null);
+
+    // Fetch fresh weather data for display
+    try {
+      const response = await fetch("/api/city-mood", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ city: cached.city }),
+      });
+
+      if (response.ok) {
+        const data = await response.json() as CityMoodResponse;
+        // Update just the weather data, keep the cached image
+        setResult(prev => prev ? {
+          ...prev,
+          weather: data.weather,
+        } : null);
+      }
+    } catch {
+      // Ignore errors - we still have the cached image
+    }
   };
 
   const handleDeleteCached = async (cached: CachedCity, e: React.MouseEvent) => {
@@ -455,9 +479,9 @@ export default function CityMoodForm() {
                     {result.weather.description}
                   </span>
                 )}
-                {result.weather.temperature !== 0 && (
+                {(result.weather.temperature !== 0 || !result.weather.cached) && (
                   <span className="px-2 py-1 bg-white/20 backdrop-blur-sm text-white text-sm font-medium rounded-full flex items-center gap-1">
-                    🌡️ {result.weather.temperature}°C
+                    🌡️ {Math.round(result.weather.temperature)}°C
                   </span>
                 )}
               </div>
