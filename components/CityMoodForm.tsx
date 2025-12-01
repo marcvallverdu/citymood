@@ -15,7 +15,6 @@ export default function CityMoodForm() {
   const [result, setResult] = useState<CityMoodResponse | null>(null);
   const [cachedCities, setCachedCities] = useState<CachedCity[]>([]);
   const [showAnimation, setShowAnimation] = useState(true);
-  const [animationFormat, setAnimationFormat] = useState<"apng" | "mp4">("apng");
   const [generatingAnimation, setGeneratingAnimation] = useState(false);
   const [imageModel, setImageModel] = useState<ImageModel>("nano-banana");
   const [videoModel, setVideoModel] = useState<VideoModel>("seedance");
@@ -267,15 +266,13 @@ export default function CityMoodForm() {
     return badges[status] || badges.none;
   };
 
-  const hasAnimation = result?.animationStatus === "completed" && (result?.animationUrl || result?.videoUrl);
+  const hasAnimation = result?.animationStatus === "completed" && result?.videoUrl;
   const displayUrl = result
     ? showAnimation && hasAnimation
-      ? animationFormat === "mp4" && result.videoUrl
-        ? result.videoUrl
-        : result.animationUrl || result.imageUrl
+      ? result.videoUrl
       : result.imageUrl
     : null;
-  const isVideoDisplay = showAnimation && hasAnimation && animationFormat === "mp4" && result?.videoUrl;
+  const isVideoDisplay = showAnimation && hasAnimation;
 
   return (
     <div className="w-full max-w-2xl mx-auto">
@@ -503,21 +500,13 @@ export default function CityMoodForm() {
 
             {/* Animation toggle at top left */}
             {hasAnimation && (
-              <div className="absolute top-3 left-3 flex gap-2">
+              <div className="absolute top-3 left-3">
                 <button
                   onClick={() => setShowAnimation(!showAnimation)}
                   className="px-3 py-1.5 bg-black/50 backdrop-blur-sm text-white text-sm font-medium rounded-full hover:bg-black/70 transition-colors"
                 >
                   {showAnimation ? "📷 Static" : "🎬 Animated"}
                 </button>
-                {showAnimation && result.videoUrl && result.animationUrl && (
-                  <button
-                    onClick={() => setAnimationFormat(animationFormat === "apng" ? "mp4" : "apng")}
-                    className="px-3 py-1.5 bg-black/50 backdrop-blur-sm text-white text-sm font-medium rounded-full hover:bg-black/70 transition-colors"
-                  >
-                    {animationFormat === "apng" ? "🎞️ MP4" : "🖼️ APNG"}
-                  </button>
-                )}
               </div>
             )}
           </div>

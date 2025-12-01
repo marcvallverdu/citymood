@@ -3,7 +3,7 @@ import { supabase, STORAGE_BUCKET, CityImage, TimeOfDay, AnimationStatus } from 
 import { WeatherCategory, getCategoryDescription } from "./weather-categories";
 import { normalizeCity } from "./weather";
 import { generateVideoFromImage } from "./veo";
-import { convertMp4ToApng, createBoomerangMp4 } from "./ffmpeg";
+import { createBoomerangMp4 } from "./ffmpeg";
 import { ImageModel, IMAGE_MODELS, VideoModel } from "./models";
 
 
@@ -247,7 +247,7 @@ export async function updateAnimationStatus(
 
 /**
  * Generate animation for an existing image
- * Returns both the APNG animation URL and the raw MP4 video URL
+ * Returns the MP4 video URL
  */
 export async function generateAnimation(
   city: string,
@@ -268,7 +268,7 @@ export async function generateAnimation(
     // Create boomerang effect (forward + reverse) for seamless looping
     const videoBuffer = await createBoomerangMp4(rawVideoBuffer);
 
-    // Upload raw MP4 to Supabase Storage first (for quality comparison)
+    // Upload MP4 to Supabase Storage
     const mp4FileName = `${normalizedCity}/${weatherCategory}_${timeOfDay}.mp4`;
     const { error: mp4UploadError } = await supabase.storage
       .from(STORAGE_BUCKET)
@@ -285,36 +285,10 @@ export async function generateAnimation(
       data: { publicUrl: videoUrl },
     } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(mp4FileName);
 
-    // Convert MP4 to APNG (Animated PNG - better quality than GIF, full 24-bit color)
-    const apngBuffer = await convertMp4ToApng(videoBuffer, {
-      fps: 12,
-      width: 512,
-      cropToSquare: false,
-    });
+    // Update database with video URL (use same URL for both fields for backwards compatibility)
+    await updateAnimationStatus(city, weatherCategory, timeOfDay, "completed", videoUrl, videoUrl);
 
-    // Upload APNG to Supabase Storage
-    const apngFileName = `${normalizedCity}/${weatherCategory}_${timeOfDay}.apng`;
-
-    const { error: uploadError } = await supabase.storage
-      .from(STORAGE_BUCKET)
-      .upload(apngFileName, apngBuffer, {
-        contentType: "image/apng",
-        upsert: true,
-      });
-
-    if (uploadError) {
-      throw new Error(`Failed to upload animation: ${uploadError.message}`);
-    }
-
-    // Get public URL for APNG
-    const {
-      data: { publicUrl: animationUrl },
-    } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(apngFileName);
-
-    // Update database with both URLs
-    await updateAnimationStatus(city, weatherCategory, timeOfDay, "completed", animationUrl, videoUrl);
-
-    return { animationUrl, videoUrl };
+    return { animationUrl: videoUrl, videoUrl };
   } catch (error) {
     // Update status to failed
     await updateAnimationStatus(city, weatherCategory, timeOfDay, "failed");
