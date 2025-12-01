@@ -63,3 +63,12 @@ export interface CityImage {
 
 // Storage bucket name
 export const STORAGE_BUCKET = "city-images";
+
+export interface WidgetCache {
+  id: string;
+  city: string;
+  weather_hash: string;
+  apng_url: string;
+  created_at: string;
+  expires_at: string;
+}

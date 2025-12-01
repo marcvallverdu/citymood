@@ -187,3 +187,66 @@ export async function validateApiKeyAsync(
     errorCode: "AUTH_INVALID_KEY",
   };
 }
+
+/**
+ * Validate API key from query parameter (for widget endpoints)
+ * Used when authentication via header isn't practical (e.g., image URLs in widgets)
+ */
+export async function validateTokenFromQuery(
+  token: string | null
+): Promise<AuthResult> {
+  if (!token) {
+    return {
+      valid: false,
+      error: "Missing token parameter",
+      errorCode: "AUTH_MISSING",
+    };
+  }
+
+  // Check if it's the admin key (constant-time comparison)
+  if (ADMIN_API_KEY && secureCompare(token, ADMIN_API_KEY)) {
+    return { valid: true, apiKey: token, isAdmin: true };
+  }
+
+  // Check if it's the legacy env var API key (constant-time comparison)
+  if (API_SECRET_KEY && secureCompare(token, API_SECRET_KEY)) {
+    return { valid: true, apiKey: token, isAdmin: false };
+  }
+
+  // Check if it's a CityMood API key (cm_live_*)
+  if (isCityMoodApiKey(token)) {
+    try {
+      const apiKeyRecord = await validateApiKeyFromDb(token);
+
+      if (!apiKeyRecord) {
+        return {
+          valid: false,
+          error: "Invalid token",
+          errorCode: "AUTH_INVALID_KEY",
+        };
+      }
+
+      // Track usage (fire and forget)
+      trackApiKeyUsage(token).catch(() => {});
+
+      return {
+        valid: true,
+        apiKey: token,
+        isAdmin: apiKeyRecord.is_admin,
+      };
+    } catch (error) {
+      console.error("Database error during token validation:", error);
+      return {
+        valid: false,
+        error: "Authentication service temporarily unavailable",
+        errorCode: "INTERNAL_ERROR",
+      };
+    }
+  }
+
+  return {
+    valid: false,
+    error: "Invalid token",
+    errorCode: "AUTH_INVALID_KEY",
+  };
+}
