@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import type { CityMoodResponse, ErrorResponse } from "@/app/api/city-mood/route";
 import type { CachedCity } from "@/app/api/cached-cities/route";
 import type { AnimationStatus } from "@/lib/supabase";
+import { IMAGE_MODELS, VIDEO_MODELS, type ImageModel, type VideoModel } from "@/lib/models";
 
 export default function CityMoodForm() {
   const [city, setCity] = useState("");
@@ -12,7 +13,10 @@ export default function CityMoodForm() {
   const [result, setResult] = useState<CityMoodResponse | null>(null);
   const [cachedCities, setCachedCities] = useState<CachedCity[]>([]);
   const [showAnimation, setShowAnimation] = useState(true);
+  const [animationFormat, setAnimationFormat] = useState<"apng" | "mp4">("apng");
   const [generatingAnimation, setGeneratingAnimation] = useState(false);
+  const [imageModel, setImageModel] = useState<ImageModel>("nano-banana");
+  const [videoModel, setVideoModel] = useState<VideoModel>("seedance");
 
   useEffect(() => {
     fetchCachedCities();
@@ -43,7 +47,7 @@ export default function CityMoodForm() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY}`,
         },
-        body: JSON.stringify({ city }),
+        body: JSON.stringify({ city, imageModel }),
       });
 
       const data = await response.json();
@@ -80,9 +84,46 @@ export default function CityMoodForm() {
       imageUrl: cached.image_url,
       imageCached: true,
       animationUrl: cached.animation_url,
+      videoUrl: cached.video_url,
       animationStatus: cached.animation_status || "none",
     });
     setError(null);
+  };
+
+  const handleDeleteCached = async (cached: CachedCity, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent triggering the parent button click
+
+    try {
+      const response = await fetch("/api/cached-cities", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY}`,
+        },
+        body: JSON.stringify({
+          city: cached.city,
+          weather_category: cached.weather_category,
+          time_of_day: cached.time_of_day,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to delete");
+      }
+
+      // Refresh the cached cities list
+      fetchCachedCities();
+
+      // Clear result if it was showing this cached city
+      if (result?.normalizedCity === cached.city &&
+          result?.weather.category === cached.weather_category &&
+          result?.weather.timeOfDay === cached.time_of_day) {
+        setResult(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete cached city");
+    }
   };
 
   const handleGenerateAnimation = async () => {
@@ -101,6 +142,7 @@ export default function CityMoodForm() {
           weatherCategory: result.weather.category,
           timeOfDay: result.weather.timeOfDay,
           imageUrl: result.imageUrl,
+          videoModel,
         }),
       });
 
@@ -114,6 +156,7 @@ export default function CityMoodForm() {
       setResult({
         ...result,
         animationUrl: data.animationUrl,
+        videoUrl: data.videoUrl,
         animationStatus: data.animationStatus,
       });
 
@@ -155,11 +198,15 @@ export default function CityMoodForm() {
     return badges[status] || badges.none;
   };
 
+  const hasAnimation = result?.animationStatus === "completed" && (result?.animationUrl || result?.videoUrl);
   const displayUrl = result
-    ? showAnimation && result.animationUrl && result.animationStatus === "completed"
-      ? result.animationUrl
+    ? showAnimation && hasAnimation
+      ? animationFormat === "mp4" && result.videoUrl
+        ? result.videoUrl
+        : result.animationUrl || result.imageUrl
       : result.imageUrl
     : null;
+  const isVideoDisplay = showAnimation && hasAnimation && animationFormat === "mp4" && result?.videoUrl;
 
   return (
     <div className="w-full max-w-2xl mx-auto">
@@ -176,10 +223,53 @@ export default function CityMoodForm() {
             id="city"
             value={city}
             onChange={(e) => setCity(e.target.value)}
-            placeholder="e.g., Barcelona, Tokyo, New York"
+            placeholder="e.g., Barcelona, Spain or Tokyo, Japan"
             className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-800 dark:text-white"
             required
           />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label
+              htmlFor="imageModel"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+            >
+              Image Model
+            </label>
+            <select
+              id="imageModel"
+              value={imageModel}
+              onChange={(e) => setImageModel(e.target.value as ImageModel)}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-800 dark:text-white"
+            >
+              {Object.entries(IMAGE_MODELS).map(([key, model]) => (
+                <option key={key} value={key}>
+                  {model.name} ({model.cost})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label
+              htmlFor="videoModel"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+            >
+              Video Model
+            </label>
+            <select
+              id="videoModel"
+              value={videoModel}
+              onChange={(e) => setVideoModel(e.target.value as VideoModel)}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-800 dark:text-white"
+            >
+              {Object.entries(VIDEO_MODELS).map(([key, model]) => (
+                <option key={key} value={key}>
+                  {model.name} ({model.cost})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <button
@@ -198,14 +288,22 @@ export default function CityMoodForm() {
           </h3>
           <div className="flex flex-wrap gap-2">
             {cachedCities.map((cached, index) => (
-              <button
-                key={index}
-                onClick={() => handleCachedClick(cached)}
-                className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full capitalize transition-colors flex items-center gap-1"
-              >
-                {getTimeIcon(cached.time_of_day)} {cached.city} ({cached.weather_category})
-                {cached.animation_status === "completed" && " 🎬"}
-              </button>
+              <div key={index} className="flex items-center gap-0.5">
+                <button
+                  onClick={() => handleCachedClick(cached)}
+                  className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-l-full capitalize transition-colors flex items-center gap-1"
+                >
+                  {getTimeIcon(cached.time_of_day)} {cached.city} ({cached.weather_category})
+                  {cached.animation_status === "completed" && " 🎬"}
+                </button>
+                <button
+                  onClick={(e) => handleDeleteCached(cached, e)}
+                  className="px-2 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-red-100 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 rounded-r-full transition-colors"
+                  title="Delete cached image"
+                >
+                  ✕
+                </button>
+              </div>
             ))}
           </div>
         </div>
@@ -220,11 +318,22 @@ export default function CityMoodForm() {
       {result && (
         <div className="mt-6">
           <div className="relative aspect-square w-full overflow-hidden rounded-xl shadow-lg">
-            <img
-              src={displayUrl || result.imageUrl}
-              alt={`${result.city} in ${result.weather.category} weather (${result.weather.timeOfDay})`}
-              className="w-full h-full object-cover"
-            />
+            {isVideoDisplay ? (
+              <video
+                src={displayUrl || result.imageUrl}
+                autoPlay
+                loop
+                muted
+                playsInline
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <img
+                src={displayUrl || result.imageUrl}
+                alt={`${result.city} in ${result.weather.category} weather (${result.weather.timeOfDay})`}
+                className="w-full h-full object-cover"
+              />
+            )}
 
             {/* Weather overlay at bottom */}
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4">
@@ -232,10 +341,10 @@ export default function CityMoodForm() {
                 {result.city}
               </h3>
               <div className="flex flex-wrap gap-2">
-                <span className="px-2 py-1 bg-white/20 backdrop-blur-sm text-white text-sm font-medium rounded-full flex items-center gap-1">
+                <span className="px-2 py-1 bg-white/20 backdrop-blur-sm text-white text-sm font-medium rounded-full flex items-center gap-1 capitalize">
                   {getWeatherIcon(result.weather.category)} {result.weather.category}
                 </span>
-                <span className="px-2 py-1 bg-white/20 backdrop-blur-sm text-white text-sm font-medium rounded-full flex items-center gap-1">
+                <span className="px-2 py-1 bg-white/20 backdrop-blur-sm text-white text-sm font-medium rounded-full flex items-center gap-1 capitalize">
                   {getTimeIcon(result.weather.timeOfDay)} {result.weather.timeOfDay}
                 </span>
                 {result.weather.description && result.weather.description !== result.weather.category && (
@@ -266,14 +375,22 @@ export default function CityMoodForm() {
             </div>
 
             {/* Animation toggle at top left */}
-            {result.animationUrl && result.animationStatus === "completed" && (
-              <div className="absolute top-3 left-3">
+            {hasAnimation && (
+              <div className="absolute top-3 left-3 flex gap-2">
                 <button
                   onClick={() => setShowAnimation(!showAnimation)}
                   className="px-3 py-1.5 bg-black/50 backdrop-blur-sm text-white text-sm font-medium rounded-full hover:bg-black/70 transition-colors"
                 >
                   {showAnimation ? "📷 Static" : "🎬 Animated"}
                 </button>
+                {showAnimation && result.videoUrl && result.animationUrl && (
+                  <button
+                    onClick={() => setAnimationFormat(animationFormat === "apng" ? "mp4" : "apng")}
+                    className="px-3 py-1.5 bg-black/50 backdrop-blur-sm text-white text-sm font-medium rounded-full hover:bg-black/70 transition-colors"
+                  >
+                    {animationFormat === "apng" ? "🎞️ MP4" : "🖼️ APNG"}
+                  </button>
+                )}
               </div>
             )}
           </div>

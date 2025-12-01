@@ -6,36 +6,35 @@ import { join } from "path";
 
 const execAsync = promisify(exec);
 
-export interface ConvertToGifOptions {
-  fps?: number; // Frames per second (default: 10)
-  width?: number; // Output width (default: 480, height auto-calculated)
-  cropToSquare?: boolean; // Center-crop 16:9 to 1:1 (default: true)
+export interface ConvertToApngOptions {
+  fps?: number; // Frames per second (default: 12)
+  width?: number; // Output width (default: 512, height auto-calculated)
+  cropToSquare?: boolean; // Center-crop 16:9 to 1:1 (default: false)
 }
 
 /**
- * Convert MP4 video buffer to optimized GIF
- * Uses ffmpeg with palette optimization for better quality and smaller size
+ * Convert MP4 video buffer to APNG (Animated PNG)
+ * APNG supports full 24-bit color (vs GIF's 256 colors) for better quality
  */
-export async function convertMp4ToGif(
+export async function convertMp4ToApng(
   mp4Buffer: Buffer,
-  options: ConvertToGifOptions = {}
+  options: ConvertToApngOptions = {}
 ): Promise<Buffer> {
-  const { fps = 10, width = 480, cropToSquare = true } = options;
+  const { fps = 12, width = 512, cropToSquare = false } = options;
 
   // Create temp directory for our files
   const tempDir = await mkdtemp(join(tmpdir(), "citymood-"));
   const inputPath = join(tempDir, "input.mp4");
-  const palettePath = join(tempDir, "palette.png");
-  const outputPath = join(tempDir, "output.gif");
+  const outputPath = join(tempDir, "output.apng");
 
   try {
     // Write input video to temp file
     await writeFile(inputPath, mp4Buffer);
 
     // Build filter chain
-    let filters: string[] = [];
+    const filters: string[] = [];
 
-    // Crop to square (center crop from 16:9 to 1:1)
+    // Crop to square (center crop from 16:9 to 1:1) if needed
     if (cropToSquare) {
       // For 16:9, height is the constraining dimension
       // Crop to square from center: crop=ih:ih:(iw-ih)/2:0
@@ -50,29 +49,28 @@ export async function convertMp4ToGif(
 
     const filterChain = filters.join(",");
 
-    // Step 1: Generate optimized palette
-    const paletteCmd = `ffmpeg -y -i "${inputPath}" -vf "${filterChain},palettegen=stats_mode=diff" "${palettePath}"`;
-    await execAsync(paletteCmd);
+    // Convert to APNG with infinite loop (-plays 0)
+    // APNG doesn't need palette generation like GIF
+    const apngCmd = `ffmpeg -y -i "${inputPath}" -vf "${filterChain}" -plays 0 "${outputPath}"`;
+    await execAsync(apngCmd);
 
-    // Step 2: Generate GIF using palette
-    const gifCmd = `ffmpeg -y -i "${inputPath}" -i "${palettePath}" -lavfi "${filterChain}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" "${outputPath}"`;
-    await execAsync(gifCmd);
+    // Read output APNG
+    const apngBuffer = await readFile(outputPath);
 
-    // Read output GIF
-    const gifBuffer = await readFile(outputPath);
-
-    return gifBuffer;
+    return apngBuffer;
   } finally {
     // Cleanup temp files
     try {
       await unlink(inputPath);
-      await unlink(palettePath);
       await unlink(outputPath);
     } catch {
       // Ignore cleanup errors
     }
   }
 }
+
+// Keep old function name as alias for backwards compatibility during transition
+export const convertMp4ToGif = convertMp4ToApng;
 
 /**
  * Check if ffmpeg is available on the system

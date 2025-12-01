@@ -1,11 +1,7 @@
-import { GoogleGenAI } from "@google/genai";
+import { fal } from "./fal";
 import { WeatherCategory } from "./weather-categories";
 import { TimeOfDay } from "./supabase";
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
-
-// Initialize Google GenAI client for Veo
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+import { VideoModel, VIDEO_MODELS } from "./models";
 
 // Animation prompt templates for each weather category
 const ANIMATION_EFFECTS: Record<WeatherCategory, string> = {
@@ -29,144 +25,63 @@ export function getAnimationPrompt(
   const effect = ANIMATION_EFFECTS[weatherCategory];
   const timeContext = timeOfDay === "day" ? "daylight" : "nighttime with soft lights";
 
-  return `Animate this miniature diorama with subtle, looping motion. Add ${effect}. The scene is in ${timeContext}. Keep the camera completely static. Create smooth, seamless looping animation. Maintain the miniature diorama aesthetic throughout.`;
+  return `Animate only the weather effects in this miniature diorama. The diorama, buildings, and all structures must remain completely still and unchanged. Only animate: ${effect}. Keep the camera completely static. The scene is in ${timeContext}. Create a smooth animation that returns to the starting state.`;
 }
 
-export interface VideoOperation {
-  name?: string;
-  done?: boolean;
-  error?: { message: string };
-  response?: {
-    generatedVideos?: Array<{
-      video?: {
-        uri?: string;
-      };
-    }>;
-  };
+// Type for fal.ai video response (shared across models)
+interface FalVideoResponse {
+  video: { url: string };
+  seed?: number;
 }
 
 /**
- * Start video generation from an image using Veo
- * Returns the operation for polling
- */
-export async function startVideoGeneration(
-  imageUrl: string,
-  weatherCategory: WeatherCategory,
-  timeOfDay: TimeOfDay
-): Promise<VideoOperation> {
-  // Fetch the image and convert to base64
-  const imageResponse = await fetch(imageUrl);
-  const imageBuffer = await imageResponse.arrayBuffer();
-  const base64Image = Buffer.from(imageBuffer).toString("base64");
-  const mimeType = imageResponse.headers.get("content-type") || "image/png";
-
-  const prompt = getAnimationPrompt(weatherCategory, timeOfDay);
-
-  // Use Veo for image-to-video generation
-  const operation = await ai.models.generateVideos({
-    model: "veo-2.0-generate-001",
-    prompt,
-    image: {
-      imageBytes: base64Image,
-      mimeType,
-    },
-    config: {
-      aspectRatio: "16:9",
-      numberOfVideos: 1,
-      durationSeconds: 5,
-      personGeneration: "dont_allow",
-    },
-  });
-
-  return operation as VideoOperation;
-}
-
-/**
- * Poll for video generation completion
- * Returns the video URI when complete, or null if still processing
- */
-export async function pollVideoGeneration(
-  operation: VideoOperation
-): Promise<{ videoUri: string } | null> {
-  const updatedOp = await ai.operations.getVideosOperation({
-    operation: operation as never,
-  }) as unknown as VideoOperation;
-
-  if (!updatedOp.done) {
-    return null;
-  }
-
-  if (updatedOp.error) {
-    throw new Error(`Video generation failed: ${updatedOp.error.message}`);
-  }
-
-  // Extract video from response
-  const response = updatedOp.response;
-  if (!response || !response.generatedVideos || response.generatedVideos.length === 0) {
-    throw new Error("No video generated in response");
-  }
-
-  const video = response.generatedVideos[0];
-  if (!video.video?.uri) {
-    throw new Error("Video generation completed but no video URI available");
-  }
-
-  return { videoUri: video.video.uri };
-}
-
-/**
- * Download video from URI and return as buffer
- */
-export async function downloadVideo(videoUri: string): Promise<Buffer> {
-  const response = await fetch(videoUri);
-  if (!response.ok) {
-    throw new Error(`Failed to download video: ${response.statusText}`);
-  }
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
-}
-
-/**
- * Wait for video generation to complete with polling
- * Polls every 10 seconds for up to maxWaitMs
- */
-export async function waitForVideoGeneration(
-  operation: VideoOperation,
-  maxWaitMs: number = 300000, // 5 minutes default
-  pollIntervalMs: number = 10000 // 10 seconds
-): Promise<string> {
-  const startTime = Date.now();
-  let currentOp = operation;
-
-  while (Date.now() - startTime < maxWaitMs) {
-    const result = await pollVideoGeneration(currentOp);
-
-    if (result) {
-      return result.videoUri;
-    }
-
-    // Wait before polling again
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-
-    // Update operation reference for next poll
-    currentOp = await ai.operations.getVideosOperation({
-      operation: currentOp as never,
-    }) as unknown as VideoOperation;
-  }
-
-  throw new Error(`Video generation timed out after ${maxWaitMs}ms`);
-}
-
-/**
- * Generate a video from an image and return the video buffer
- * This is a convenience function that starts generation and waits for completion
+ * Generate a video from an image using the selected fal.ai model
+ * Returns the video buffer
  */
 export async function generateVideoFromImage(
   imageUrl: string,
   weatherCategory: WeatherCategory,
-  timeOfDay: TimeOfDay
+  timeOfDay: TimeOfDay,
+  model: VideoModel = "seedance"
 ): Promise<Buffer> {
-  const operation = await startVideoGeneration(imageUrl, weatherCategory, timeOfDay);
-  const videoUri = await waitForVideoGeneration(operation);
-  return downloadVideo(videoUri);
+  const prompt = getAnimationPrompt(weatherCategory, timeOfDay);
+  const modelConfig = VIDEO_MODELS[model];
+
+  console.log(`Starting ${model} video generation with fal.subscribe()...`);
+
+  const result = await fal.subscribe(modelConfig.id, {
+    input: {
+      prompt,
+      image_url: imageUrl,
+      end_image_url: imageUrl, // Same image for seamless loop
+      aspect_ratio: "1:1",
+      resolution: "720p",
+      duration: 5,
+      camera_fixed: true,
+    },
+    onQueueUpdate(update) {
+      console.log(`${model} status: ${update.status}`);
+    },
+  });
+
+  const response = result.data as FalVideoResponse;
+
+  console.log("Fal.ai video response:", JSON.stringify(response, null, 2));
+
+  // Extract video URL from response
+  if (!response.video || !response.video.url) {
+    throw new Error(`No video generated in response. Got: ${JSON.stringify(response)}`);
+  }
+
+  const videoUrl = response.video.url;
+  console.log("Video URL to download:", videoUrl);
+
+  // Download the video
+  const videoResponse = await fetch(videoUrl);
+  if (!videoResponse.ok) {
+    throw new Error(`Failed to download video: ${videoResponse.status} ${videoResponse.statusText}`);
+  }
+
+  const arrayBuffer = await videoResponse.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }

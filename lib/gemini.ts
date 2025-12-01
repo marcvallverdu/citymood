@@ -1,19 +1,17 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { fal } from "./fal";
 import { supabase, STORAGE_BUCKET, CityImage, TimeOfDay, AnimationStatus } from "./supabase";
 import { WeatherCategory, getCategoryDescription } from "./weather-categories";
 import { normalizeCity } from "./weather";
 import { generateVideoFromImage } from "./veo";
-import { convertMp4ToGif } from "./ffmpeg";
+import { convertMp4ToApng } from "./ffmpeg";
+import { ImageModel, IMAGE_MODELS, VideoModel } from "./models";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
 
-// Initialize Gemini client
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // Image prompt template with time of day
-const PROMPT_TEMPLATE = `Create a highly detailed miniature diorama of {CITY} in isometric 3D view, placed on a thick wooden or textured platform base with rounded edges. Feature the city's most iconic landmarks and architectural elements as detailed miniature models. The scene should look like a collectible tabletop diorama with realistic depth and scale.
+const PROMPT_TEMPLATE = `Create a highly detailed miniature diorama of {CITY} in isometric 3D view, placed on a thick textured platform base with rounded edges. Feature the city's most iconic landmarks and architectural elements as detailed miniature models. The scene should look like a collectible tabletop diorama with realistic depth and scale.
 
-Style: Tilt-shift photography aesthetic, detailed miniature models, warm lighting, soft shadows, high-quality 3D render with PBR materials.
+Style: lear, 45° top-down isometric miniature 3D cartoon scene, detailed miniature models, warm lighting, soft shadows, high-quality 3D render with PBR materials.
 
 Weather and time: {WEATHER} {TIME_OF_DAY} atmosphere - integrate weather effects naturally (clouds, lighting mood, sky color).
 
@@ -55,59 +53,108 @@ export async function getCachedImage(
   return data;
 }
 
+// Type for fal.ai image response (shared across models)
+interface FalImage {
+  url: string;
+  file_name?: string;
+  content_type?: string;
+  width?: number;
+  height?: number;
+}
+
+interface FalImageResponse {
+  images: FalImage[];
+  description?: string;
+}
+
 /**
- * Generate an image using Gemini API
+ * Generate an image using the selected fal.ai model
  */
 export async function generateImage(
   city: string,
   weatherCategory: WeatherCategory,
-  timeOfDay: TimeOfDay
+  timeOfDay: TimeOfDay,
+  model: ImageModel = "nano-banana"
 ): Promise<string> {
   const normalizedCity = normalizeCity(city);
   const prompt = generatePrompt(city, weatherCategory, timeOfDay);
+  const modelConfig = IMAGE_MODELS[model];
 
-  // Use Gemini 3 Pro for image generation
-  const model = genAI.getGenerativeModel({
-    model: "gemini-3-pro-image-preview",
-    generationConfig: {
-      // @ts-expect-error - responseModalities is valid for image generation but not in types
-      responseModalities: ["TEXT", "IMAGE"],
-    },
-  });
+  let result;
 
-  const result = await model.generateContent(prompt);
-  const response = result.response;
+  console.log(`Starting ${model} image generation with fal.subscribe()...`);
 
-  // Extract image data from response
-  const parts = response.candidates?.[0]?.content?.parts;
-  if (!parts) {
-    throw new Error("No response from Gemini API");
+  // Call the appropriate model with its specific parameters
+  switch (model) {
+    case "nano-banana":
+      result = await fal.subscribe(modelConfig.id, {
+        input: {
+          prompt,
+          aspect_ratio: "1:1",
+          resolution: "1K",
+          output_format: "png",
+          num_images: 1,
+        },
+        onQueueUpdate(update) {
+          console.log(`${model} status: ${update.status}`);
+        },
+      });
+      break;
+
+    case "seedream":
+      result = await fal.subscribe(modelConfig.id, {
+        input: {
+          prompt,
+          image_size: "square_hd",
+          num_images: 1,
+          enable_safety_checker: true,
+        },
+        onQueueUpdate(update) {
+          console.log(`${model} status: ${update.status}`);
+        },
+      });
+      break;
+
+    case "imagen4":
+      result = await fal.subscribe(modelConfig.id, {
+        input: {
+          prompt,
+          aspect_ratio: "1:1",
+          safety_filter_level: "block_low_and_above",
+        },
+        onQueueUpdate(update) {
+          console.log(`${model} status: ${update.status}`);
+        },
+      });
+      break;
+
+    default:
+      throw new Error(`Unknown image model: ${model}`);
   }
 
-  // Find the image part in the response
-  const imagePart = parts.find(
-    (part) => "inlineData" in part && part.inlineData?.mimeType?.startsWith("image/")
-  );
+  const response = result.data as FalImageResponse;
 
-  if (!imagePart || !("inlineData" in imagePart) || !imagePart.inlineData) {
+  // Extract image URL from response
+  if (!response.images || response.images.length === 0) {
     throw new Error("No image generated in response");
   }
 
-  const imageData = imagePart.inlineData.data;
-  const mimeType = imagePart.inlineData.mimeType;
+  const generatedImageUrl = response.images[0].url;
 
-  // Convert base64 to buffer
-  const buffer = Buffer.from(imageData, "base64");
-
-  // Determine file extension from mime type
-  const extension = mimeType === "image/png" ? "png" : "jpg";
-  const fileName = `${normalizedCity}/${weatherCategory}_${timeOfDay}.${extension}`;
+  // Download the image from fal.ai
+  const imageResponse = await fetch(generatedImageUrl);
+  if (!imageResponse.ok) {
+    throw new Error(`Failed to download image: ${imageResponse.statusText}`);
+  }
+  const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
 
   // Upload to Supabase Storage
+  const fileName = `${normalizedCity}/${weatherCategory}_${timeOfDay}.png`;
+
   const { error: uploadError } = await supabase.storage
     .from(STORAGE_BUCKET)
-    .upload(fileName, buffer, {
-      contentType: mimeType,
+    .upload(fileName, imageBuffer, {
+      contentType: "image/png",
       upsert: true,
     });
 
@@ -143,21 +190,25 @@ export async function generateImage(
 export async function getOrGenerateImage(
   city: string,
   weatherCategory: WeatherCategory,
-  timeOfDay: TimeOfDay
-): Promise<{ imageUrl: string; cached: boolean; animationUrl?: string; animationStatus: AnimationStatus }> {
-  // Check for cached image first
-  const cached = await getCachedImage(city, weatherCategory, timeOfDay);
-  if (cached) {
-    return {
-      imageUrl: cached.image_url,
-      cached: true,
-      animationUrl: cached.animation_url,
-      animationStatus: cached.animation_status || "none",
-    };
+  timeOfDay: TimeOfDay,
+  imageModel: ImageModel = "nano-banana"
+): Promise<{ imageUrl: string; cached: boolean; animationUrl?: string; videoUrl?: string; animationStatus: AnimationStatus }> {
+  // Check for cached image first (only use cache if using default model)
+  if (imageModel === "nano-banana") {
+    const cached = await getCachedImage(city, weatherCategory, timeOfDay);
+    if (cached) {
+      return {
+        imageUrl: cached.image_url,
+        cached: true,
+        animationUrl: cached.animation_url,
+        videoUrl: cached.video_url,
+        animationStatus: cached.animation_status || "none",
+      };
+    }
   }
 
-  // Generate new image
-  const imageUrl = await generateImage(city, weatherCategory, timeOfDay);
+  // Generate new image with selected model
+  const imageUrl = await generateImage(city, weatherCategory, timeOfDay, imageModel);
   return { imageUrl, cached: false, animationStatus: "none" };
 }
 
@@ -169,16 +220,21 @@ export async function updateAnimationStatus(
   weatherCategory: WeatherCategory,
   timeOfDay: TimeOfDay,
   status: AnimationStatus,
-  animationUrl?: string
+  animationUrl?: string,
+  videoUrl?: string
 ): Promise<void> {
   const normalizedCity = normalizeCity(city);
 
-  const updateData: { animation_status: AnimationStatus; animation_url?: string } = {
+  const updateData: { animation_status: AnimationStatus; animation_url?: string; video_url?: string } = {
     animation_status: status,
   };
 
   if (animationUrl) {
     updateData.animation_url = animationUrl;
+  }
+
+  if (videoUrl) {
+    updateData.video_url = videoUrl;
   }
 
   await supabase
@@ -191,36 +247,55 @@ export async function updateAnimationStatus(
 
 /**
  * Generate animation for an existing image
+ * Returns both the APNG animation URL and the raw MP4 video URL
  */
 export async function generateAnimation(
   city: string,
   weatherCategory: WeatherCategory,
   timeOfDay: TimeOfDay,
-  imageUrl: string
-): Promise<string> {
+  imageUrl: string,
+  videoModel: VideoModel = "seedance"
+): Promise<{ animationUrl: string; videoUrl: string }> {
   const normalizedCity = normalizeCity(city);
 
   // Update status to processing
   await updateAnimationStatus(city, weatherCategory, timeOfDay, "processing");
 
   try {
-    // Generate video from image using Veo
-    const videoBuffer = await generateVideoFromImage(imageUrl, weatherCategory, timeOfDay);
+    // Generate video from image using selected model
+    const videoBuffer = await generateVideoFromImage(imageUrl, weatherCategory, timeOfDay, videoModel);
 
-    // Convert MP4 to GIF with center crop to 1:1
-    const gifBuffer = await convertMp4ToGif(videoBuffer, {
+    // Upload raw MP4 to Supabase Storage first (for quality comparison)
+    const mp4FileName = `${normalizedCity}/${weatherCategory}_${timeOfDay}.mp4`;
+    const { error: mp4UploadError } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(mp4FileName, videoBuffer, {
+        contentType: "video/mp4",
+        upsert: true,
+      });
+
+    if (mp4UploadError) {
+      throw new Error(`Failed to upload MP4: ${mp4UploadError.message}`);
+    }
+
+    const {
+      data: { publicUrl: videoUrl },
+    } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(mp4FileName);
+
+    // Convert MP4 to APNG (Animated PNG - better quality than GIF, full 24-bit color)
+    const apngBuffer = await convertMp4ToApng(videoBuffer, {
       fps: 12,
       width: 512,
-      cropToSquare: true,
+      cropToSquare: false,
     });
 
-    // Upload GIF to Supabase Storage
-    const fileName = `${normalizedCity}/${weatherCategory}_${timeOfDay}.gif`;
+    // Upload APNG to Supabase Storage
+    const apngFileName = `${normalizedCity}/${weatherCategory}_${timeOfDay}.apng`;
 
     const { error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)
-      .upload(fileName, gifBuffer, {
-        contentType: "image/gif",
+      .upload(apngFileName, apngBuffer, {
+        contentType: "image/apng",
         upsert: true,
       });
 
@@ -228,15 +303,15 @@ export async function generateAnimation(
       throw new Error(`Failed to upload animation: ${uploadError.message}`);
     }
 
-    // Get public URL
+    // Get public URL for APNG
     const {
-      data: { publicUrl },
-    } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(fileName);
+      data: { publicUrl: animationUrl },
+    } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(apngFileName);
 
-    // Update database with animation URL
-    await updateAnimationStatus(city, weatherCategory, timeOfDay, "completed", publicUrl);
+    // Update database with both URLs
+    await updateAnimationStatus(city, weatherCategory, timeOfDay, "completed", animationUrl, videoUrl);
 
-    return publicUrl;
+    return { animationUrl, videoUrl };
   } catch (error) {
     // Update status to failed
     await updateAnimationStatus(city, weatherCategory, timeOfDay, "failed");
@@ -251,27 +326,34 @@ export async function getOrGenerateAnimation(
   city: string,
   weatherCategory: WeatherCategory,
   timeOfDay: TimeOfDay,
-  imageUrl: string
-): Promise<{ animationUrl: string | null; animationStatus: AnimationStatus }> {
-  // Check if animation already exists
-  const cached = await getCachedImage(city, weatherCategory, timeOfDay);
+  imageUrl: string,
+  videoModel: VideoModel = "seedance"
+): Promise<{ animationUrl: string | null; videoUrl: string | null; animationStatus: AnimationStatus }> {
+  // Check if animation already exists (only use cache if using default model)
+  if (videoModel === "seedance") {
+    const cached = await getCachedImage(city, weatherCategory, timeOfDay);
 
-  if (cached?.animation_status === "completed" && cached.animation_url) {
-    return { animationUrl: cached.animation_url, animationStatus: "completed" };
-  }
+    if (cached?.animation_status === "completed" && cached.animation_url) {
+      return {
+        animationUrl: cached.animation_url,
+        videoUrl: cached.video_url || null,
+        animationStatus: "completed",
+      };
+    }
 
-  if (cached?.animation_status === "processing") {
-    return { animationUrl: null, animationStatus: "processing" };
+    if (cached?.animation_status === "processing") {
+      return { animationUrl: null, videoUrl: null, animationStatus: "processing" };
+    }
   }
 
   // Start animation generation
   // Note: This is a long-running operation, so in production you'd want to
   // handle this asynchronously (e.g., with a job queue)
   try {
-    const animationUrl = await generateAnimation(city, weatherCategory, timeOfDay, imageUrl);
-    return { animationUrl, animationStatus: "completed" };
+    const { animationUrl, videoUrl } = await generateAnimation(city, weatherCategory, timeOfDay, imageUrl, videoModel);
+    return { animationUrl, videoUrl, animationStatus: "completed" };
   } catch (error) {
     console.error("Animation generation failed:", error);
-    return { animationUrl: null, animationStatus: "failed" };
+    return { animationUrl: null, videoUrl: null, animationStatus: "failed" };
   }
 }

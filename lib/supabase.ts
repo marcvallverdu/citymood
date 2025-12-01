@@ -56,6 +56,7 @@ export interface CityImage {
   image_url: string;
   prompt_used: string;
   animation_url?: string;
+  video_url?: string;
   animation_status: AnimationStatus;
   created_at: string;
 }

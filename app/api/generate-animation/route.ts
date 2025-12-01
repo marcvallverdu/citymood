@@ -3,16 +3,19 @@ import { validateApiKey } from "@/lib/auth";
 import { getOrGenerateAnimation } from "@/lib/gemini";
 import { WeatherCategory } from "@/lib/weather-categories";
 import { TimeOfDay, AnimationStatus } from "@/lib/supabase";
+import { VideoModel } from "@/lib/models";
 
 export interface GenerateAnimationRequest {
   city: string;
   weatherCategory: WeatherCategory;
   timeOfDay: TimeOfDay;
   imageUrl: string;
+  videoModel?: VideoModel;
 }
 
 export interface GenerateAnimationResponse {
   animationUrl: string | null;
+  videoUrl: string | null;
   animationStatus: AnimationStatus;
 }
 
@@ -71,15 +74,18 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { animationUrl, animationStatus } = await getOrGenerateAnimation(
+    const videoModel = body.videoModel || "seedance";
+    const { animationUrl, videoUrl, animationStatus } = await getOrGenerateAnimation(
       body.city,
       body.weatherCategory,
       body.timeOfDay,
-      body.imageUrl
+      body.imageUrl,
+      videoModel
     );
 
     const response: GenerateAnimationResponse = {
       animationUrl,
+      videoUrl,
       animationStatus,
     };
 

@@ -3,9 +3,11 @@ import { validateApiKey } from "@/lib/auth";
 import { getWeatherForCity, normalizeCity } from "@/lib/weather";
 import { getOrGenerateImage } from "@/lib/gemini";
 import { TimeOfDay, AnimationStatus } from "@/lib/supabase";
+import { ImageModel } from "@/lib/models";
 
 export interface CityMoodRequest {
   city: string;
+  imageModel?: ImageModel;
 }
 
 export interface CityMoodResponse {
@@ -25,6 +27,7 @@ export interface CityMoodResponse {
   imageUrl: string;
   imageCached: boolean;
   animationUrl?: string;
+  videoUrl?: string;
   animationStatus: AnimationStatus;
 }
 
@@ -83,11 +86,13 @@ export async function POST(request: NextRequest) {
     // Determine time of day from weather data
     const timeOfDay: TimeOfDay = weather.isDay ? "day" : "night";
 
-    // Get or generate image (now includes time of day)
-    const { imageUrl, cached: imageCached, animationUrl, animationStatus } = await getOrGenerateImage(
+    // Get or generate image (now includes time of day and model selection)
+    const imageModel = body.imageModel || "nano-banana";
+    const { imageUrl, cached: imageCached, animationUrl, videoUrl, animationStatus } = await getOrGenerateImage(
       city,
       weather.category,
-      timeOfDay
+      timeOfDay,
+      imageModel
     );
 
     const response: CityMoodResponse = {
@@ -107,6 +112,7 @@ export async function POST(request: NextRequest) {
       imageUrl,
       imageCached,
       animationUrl,
+      videoUrl,
       animationStatus,
     };
 

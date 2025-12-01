@@ -9,8 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@google/genai": "^1.30.0",
-    "@google/generative-ai": "^0.24.1",
+    "@fal-ai/client": "^1.7.2",
     "@supabase/supabase-js": "^2.86.0",
     "@types/fluent-ffmpeg": "^2.1.28",
     "fluent-ffmpeg": "^2.1.3",
