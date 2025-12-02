@@ -118,7 +118,7 @@ export async function GET(
           "Content-Type": "image/png",
           "Retry-After": "120",
           "X-Status": "generating",
-          "X-Message": `Generating animation for ${formatOverlayText(city, weather)}. Please retry in ~2 minutes.`,
+          "X-City": city,
         },
       });
     }
