@@ -5,11 +5,13 @@ import Link from "next/link";
 import CityMediaGallery from "@/components/admin/CityMediaGallery";
 import WidgetCacheTable from "@/components/admin/WidgetCacheTable";
 import WeatherCacheTable from "@/components/admin/WeatherCacheTable";
+import FailedJobsTable from "@/components/admin/FailedJobsTable";
 import type { CityImageEntry } from "@/app/api/admin/gallery/route";
 import type { WidgetCacheEntry } from "@/app/api/admin/widget-cache/route";
 import type { WeatherCacheEntry } from "@/app/api/admin/weather-cache/route";
+import type { FailedJobEntry } from "@/app/api/admin/failed-jobs/route";
 
-type Tab = "gallery" | "widget-cache" | "weather-cache";
+type Tab = "gallery" | "widget-cache" | "weather-cache" | "failed-jobs";
 
 export default function GalleryPage() {
   const [adminKey, setAdminKey] = useState<string>("");
@@ -20,6 +22,7 @@ export default function GalleryPage() {
   const [images, setImages] = useState<CityImageEntry[]>([]);
   const [widgetCache, setWidgetCache] = useState<WidgetCacheEntry[]>([]);
   const [weatherCache, setWeatherCache] = useState<WeatherCacheEntry[]>([]);
+  const [failedJobs, setFailedJobs] = useState<FailedJobEntry[]>([]);
 
   useEffect(() => {
     const savedKey = localStorage.getItem("citymood_admin_key");
@@ -39,7 +42,7 @@ export default function GalleryPage() {
     setError(null);
 
     try {
-      const [galleryRes, widgetRes, weatherRes] = await Promise.all([
+      const [galleryRes, widgetRes, weatherRes, failedRes] = await Promise.all([
         fetch("/api/admin/gallery", {
           headers: { Authorization: `Bearer ${adminKey}` },
         }),
@@ -49,22 +52,27 @@ export default function GalleryPage() {
         fetch("/api/admin/weather-cache", {
           headers: { Authorization: `Bearer ${adminKey}` },
         }),
+        fetch("/api/admin/failed-jobs", {
+          headers: { Authorization: `Bearer ${adminKey}` },
+        }),
       ]);
 
-      if (!galleryRes.ok || !widgetRes.ok || !weatherRes.ok) {
+      if (!galleryRes.ok || !widgetRes.ok || !weatherRes.ok || !failedRes.ok) {
         const errorData = await galleryRes.json().catch(() => ({}));
         throw new Error(errorData.error?.message || "Failed to fetch data");
       }
 
-      const [galleryData, widgetData, weatherData] = await Promise.all([
+      const [galleryData, widgetData, weatherData, failedData] = await Promise.all([
         galleryRes.json(),
         widgetRes.json(),
         weatherRes.json(),
+        failedRes.json(),
       ]);
 
       setImages(galleryData.data?.images || []);
       setWidgetCache(widgetData.data?.entries || []);
       setWeatherCache(weatherData.data?.entries || []);
+      setFailedJobs(failedData.data?.jobs || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -90,6 +98,14 @@ export default function GalleryPage() {
     setWidgetCache((prev) => prev.filter((entry) => entry.id !== id));
   };
 
+  const handleFailedJobRetry = (id: string) => {
+    setFailedJobs((prev) => prev.filter((job) => job.id !== id));
+  };
+
+  const handleFailedJobDelete = (id: string) => {
+    setFailedJobs((prev) => prev.filter((job) => job.id !== id));
+  };
+
   if (!adminKey) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
@@ -113,10 +129,11 @@ export default function GalleryPage() {
     );
   }
 
-  const tabs: { id: Tab; label: string; count: number }[] = [
+  const tabs: { id: Tab; label: string; count: number; highlight?: boolean }[] = [
     { id: "gallery", label: "City Images", count: images.length },
     { id: "widget-cache", label: "Widget Cache", count: widgetCache.length },
     { id: "weather-cache", label: "Weather Cache", count: weatherCache.length },
+    { id: "failed-jobs", label: "Failed Jobs", count: failedJobs.length, highlight: failedJobs.length > 0 },
   ];
 
   return (
@@ -163,7 +180,11 @@ export default function GalleryPage() {
                 }`}
               >
                 {tab.label}
-                <span className="ml-2 px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded-full text-xs">
+                <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                  tab.highlight
+                    ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
+                    : "bg-gray-100 dark:bg-gray-800"
+                }`}>
                   {tab.count}
                 </span>
               </button>
@@ -192,6 +213,14 @@ export default function GalleryPage() {
             )}
             {activeTab === "weather-cache" && (
               <WeatherCacheTable entries={weatherCache} />
+            )}
+            {activeTab === "failed-jobs" && (
+              <FailedJobsTable
+                jobs={failedJobs}
+                adminKey={adminKey}
+                onRetry={handleFailedJobRetry}
+                onDelete={handleFailedJobDelete}
+              />
             )}
           </>
         )}

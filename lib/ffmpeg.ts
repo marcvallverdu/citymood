@@ -33,7 +33,8 @@ export async function createBoomerangMp4(
     // Build filter chain:
     // 1. Split input, reverse one copy, concatenate for boomerang effect
     // 2. Optionally add weather overlay on top
-    let filters = "[0:v]split[a][b];[b]reverse[r];[a][r]concat=n=2:v=1:a=0[out]";
+    let filters: string;
+    let mapOutput: string;
 
     if (overlayText) {
       const escapedText = escapeFFmpegText(overlayText);
@@ -41,11 +42,16 @@ export async function createBoomerangMp4(
       const fontSize = 32;
       const textY = `h-${Math.round(barHeight / 2 + fontSize / 3)}`;
 
-      // Add semi-transparent bar and centered text at the bottom
-      filters += `;[out]drawbox=x=0:y=ih-${barHeight}:w=iw:h=${barHeight}:color=black@0.5:t=fill,drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=white:x=(w-text_w)/2:y=${textY}:shadowcolor=black@0.7:shadowx=2:shadowy=2`;
+      // Boomerang + overlay: chain filters together, output to [final]
+      filters = `[0:v]split[a][b];[b]reverse[r];[a][r]concat=n=2:v=1:a=0[boomerang];[boomerang]drawbox=x=0:y=ih-${barHeight}:w=iw:h=${barHeight}:color=black@0.5:t=fill,drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=white:x=(w-text_w)/2:y=${textY}:shadowcolor=black@0.7:shadowx=2:shadowy=2[final]`;
+      mapOutput = "[final]";
+    } else {
+      // Boomerang only: output to [final]
+      filters = "[0:v]split[a][b];[b]reverse[r];[a][r]concat=n=2:v=1:a=0[final]";
+      mapOutput = "[final]";
     }
 
-    const cmd = `ffmpeg -y -i "${inputPath}" -filter_complex "${filters}" -an "${outputPath}"`;
+    const cmd = `ffmpeg -y -i "${inputPath}" -filter_complex "${filters}" -map "${mapOutput}" -an "${outputPath}"`;
     await execAsync(cmd);
 
     return await readFile(outputPath);

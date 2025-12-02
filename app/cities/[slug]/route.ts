@@ -46,24 +46,9 @@ export async function GET(
     );
   }
 
-  // 2. Validate token from query parameter
+  // 2. Get token (may be null for public access to cached content)
+  // Auth is only required when triggering generation
   const token = request.nextUrl.searchParams.get("token");
-  const authResult = await validateTokenFromQuery(token);
-
-  if (!authResult.valid) {
-    return new NextResponse(
-      JSON.stringify({
-        error: "Unauthorized",
-        message: authResult.error,
-      }),
-      {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      }
-    );
-  }
-
-  const apiKey = authResult.apiKey!;
 
   try {
     // 3. Fetch weather data (uses 1-hour cache)
@@ -136,10 +121,13 @@ export async function GET(
 
     // 6. If we have a static image, add overlay and serve it
     if (cached?.image_url) {
-      // Trigger video generation in background (deduped - won't create duplicate jobs)
-      triggerVideoGeneration(apiKey, city).catch((error) => {
-        console.error("Failed to trigger video generation:", error);
-      });
+      // Only trigger video generation if authenticated (skip silently for public access)
+      const authResult = await validateTokenFromQuery(token);
+      if (authResult.valid) {
+        triggerVideoGeneration(authResult.apiKey!, city).catch((error) => {
+          console.error("Failed to trigger video generation:", error);
+        });
+      }
 
       try {
         const imageResponse = await fetch(cached.image_url);
@@ -168,8 +156,22 @@ export async function GET(
       }
     }
 
-    // 7. Nothing cached - trigger full generation and return placeholder
-    triggerVideoGeneration(apiKey, city).catch((error) => {
+    // 7. Nothing cached - require auth to trigger generation
+    const authResult = await validateTokenFromQuery(token);
+    if (!authResult.valid) {
+      return new NextResponse(
+        JSON.stringify({
+          error: "Unauthorized",
+          message: "Authentication required to generate content for new cities",
+        }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    triggerVideoGeneration(authResult.apiKey!, city).catch((error) => {
       console.error("Failed to trigger generation:", error);
     });
 
