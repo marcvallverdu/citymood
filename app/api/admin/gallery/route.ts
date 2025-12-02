@@ -15,6 +15,7 @@ export interface CityImageEntry {
   image_url: string;
   video_url: string | null;
   animation_url: string | null;
+  apng_url: string | null;
   animation_status: string;
   created_at: string;
 }
@@ -48,26 +49,45 @@ export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabase();
 
-    const { data, error } = await supabase
-      .from("city_images")
-      .select("*")
-      .order("created_at", { ascending: false });
+    // Fetch city images and widget cache in parallel
+    const [imagesResult, widgetCacheResult] = await Promise.all([
+      supabase
+        .from("city_images")
+        .select("*")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("widget_cache")
+        .select("city, apng_url, weather_hash")
+        .gt("expires_at", new Date().toISOString()),
+    ]);
 
-    if (error) {
-      throw new Error(`Failed to fetch city images: ${error.message}`);
+    if (imagesResult.error) {
+      throw new Error(`Failed to fetch city images: ${imagesResult.error.message}`);
     }
 
-    const images: CityImageEntry[] = (data || []).map((row) => ({
-      id: row.id,
-      city: row.city,
-      weather_category: row.weather_category,
-      time_of_day: row.time_of_day || "day",
-      image_url: row.image_url,
-      video_url: row.video_url || null,
-      animation_url: row.animation_url || null,
-      animation_status: row.animation_status || "none",
-      created_at: row.created_at,
-    }));
+    // Build a map of city -> apng_url from widget cache
+    const apngMap: Record<string, string> = {};
+    for (const entry of widgetCacheResult.data || []) {
+      // Use lowercase city as key for matching
+      const key = entry.city.toLowerCase();
+      apngMap[key] = entry.apng_url;
+    }
+
+    const images: CityImageEntry[] = (imagesResult.data || []).map((row) => {
+      const cityKey = row.city.toLowerCase();
+      return {
+        id: row.id,
+        city: row.city,
+        weather_category: row.weather_category,
+        time_of_day: row.time_of_day || "day",
+        image_url: row.image_url,
+        video_url: row.video_url || null,
+        animation_url: row.animation_url || null,
+        apng_url: apngMap[cityKey] || null,
+        animation_status: row.animation_status || "none",
+        created_at: row.created_at,
+      };
+    });
 
     return createSuccessResponse(requestId, { images }, startTime);
   } catch (error) {

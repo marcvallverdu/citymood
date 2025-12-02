@@ -56,6 +56,7 @@ export default function CityMediaGallery({ images, adminKey, onDelete }: CityMed
   const filteredImages = images.filter((img) => {
     if (filter === "all") return true;
     if (filter === "with-video") return img.animation_status === "completed";
+    if (filter === "with-apng") return !!img.apng_url;
     if (filter === "no-video") return img.animation_status !== "completed";
     return true;
   });
@@ -101,6 +102,7 @@ export default function CityMediaGallery({ images, adminKey, onDelete }: CityMed
         >
           <option value="all">All</option>
           <option value="with-video">With Video</option>
+          <option value="with-apng">With APNG</option>
           <option value="no-video">No Video</option>
         </select>
       </div>
@@ -164,7 +166,7 @@ export default function CityMediaGallery({ images, adminKey, onDelete }: CityMed
                   </div>
 
                   {/* Actions */}
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3 flex gap-2 flex-wrap">
                     <a
                       href={image.image_url}
                       target="_blank"
@@ -181,6 +183,16 @@ export default function CityMediaGallery({ images, adminKey, onDelete }: CityMed
                         className="flex-1 text-center text-xs px-2 py-1.5 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition"
                       >
                         Video
+                      </a>
+                    )}
+                    {image.apng_url && (
+                      <a
+                        href={image.apng_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 text-center text-xs px-2 py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 rounded hover:bg-purple-200 dark:hover:bg-purple-900/50 transition"
+                      >
+                        APNG
                       </a>
                     )}
                     <button
