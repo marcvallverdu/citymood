@@ -106,7 +106,7 @@ export async function GET(
     // 6. If we have a static image, redirect to it (no FFmpeg needed)
     // Video generation will create the APNG in the background
     if (imageUrl) {
-      // Trigger video/APNG generation in background
+      // Trigger video/APNG generation in background (deduped - won't create duplicate jobs)
       triggerVideoGeneration(apiKey, city).catch((error) => {
         console.error("Failed to trigger video generation:", error);
       });
@@ -122,9 +122,10 @@ export async function GET(
       });
     }
 
-    // 7. Nothing cached - trigger full generation
+    // 7. Nothing cached - trigger full generation (deduped - won't create duplicate jobs)
+    let jobInfo: { jobId: string; alreadyProcessing: boolean } | null = null;
     try {
-      await triggerVideoGeneration(apiKey, city);
+      jobInfo = await triggerVideoGeneration(apiKey, city);
     } catch (error) {
       console.error("Failed to trigger generation:", error);
     }
@@ -134,8 +135,12 @@ export async function GET(
       JSON.stringify({
         status: "generating",
         city: city,
-        message: "Image is being generated. Please retry in 2 minutes.",
+        message: jobInfo?.alreadyProcessing
+          ? "Image generation already in progress. Please retry in 2 minutes."
+          : "Image is being generated. Please retry in 2 minutes.",
         overlay: formatOverlayText(city, weather),
+        job_id: jobInfo?.jobId,
+        already_processing: jobInfo?.alreadyProcessing || false,
       }),
       {
         status: 202,
@@ -144,6 +149,7 @@ export async function GET(
           "Retry-After": "120",
           "X-Status": "generating",
           "X-City": city,
+          ...(jobInfo?.jobId && { "X-Job-Id": jobInfo.jobId }),
         },
       }
     );

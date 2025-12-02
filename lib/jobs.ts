@@ -149,6 +149,38 @@ export function validateJobOwnership(job: VideoJob, apiKey: string): boolean {
 }
 
 /**
+ * Check if there's an active job for a specific city
+ * Returns the active job ID if one exists (prevents duplicate generation)
+ */
+export async function getActiveJobForCity(
+  city: string,
+  jobType: JobType = "video"
+): Promise<string | null> {
+  const normalizedCity = city.toLowerCase().trim();
+
+  const { data, error } = await supabase
+    .from("video_jobs")
+    .select("id")
+    .ilike("city", normalizedCity)
+    .eq("job_type", jobType)
+    .in("status", ["pending", "processing"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single<{ id: string }>();
+
+  if (error) {
+    if (error.code === "PGRST116") {
+      // No active jobs for this city
+      return null;
+    }
+    console.error("Failed to check active jobs for city:", error.message);
+    return null; // Don't block on error, just allow new job
+  }
+
+  return data?.id || null;
+}
+
+/**
  * Update job status to processing and set initial stage
  */
 export async function startJob(jobId: string): Promise<void> {
