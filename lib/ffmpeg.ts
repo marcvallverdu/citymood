@@ -136,6 +136,49 @@ export async function convertMp4ToApngWithOverlay(
 }
 
 /**
+ * Add weather overlay to a static PNG image
+ * Creates a semi-transparent bar at the bottom with weather info
+ */
+export async function addOverlayToImage(
+  imageBuffer: Buffer,
+  overlayText: string
+): Promise<Buffer> {
+  const ffmpegAvailable = await checkFfmpegAvailable();
+  if (!ffmpegAvailable) {
+    console.log("FFmpeg not available, returning original image");
+    return imageBuffer;
+  }
+
+  const tempDir = await mkdtemp(join(tmpdir(), "citymood-overlay-"));
+  const inputPath = join(tempDir, "input.png");
+  const outputPath = join(tempDir, "output.png");
+
+  try {
+    await writeFile(inputPath, imageBuffer);
+
+    const escapedText = escapeFFmpegText(overlayText);
+    const barHeight = 80;
+    const fontSize = 32;
+    const textY = `h-${Math.round(barHeight / 2 + fontSize / 3)}`;
+
+    // Add semi-transparent bar and centered text at the bottom
+    const filters = `drawbox=x=0:y=ih-${barHeight}:w=iw:h=${barHeight}:color=black@0.5:t=fill,drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=white:x=(w-text_w)/2:y=${textY}:shadowcolor=black@0.7:shadowx=2:shadowy=2`;
+
+    const cmd = `ffmpeg -y -i "${inputPath}" -vf "${filters}" "${outputPath}"`;
+    await execAsync(cmd);
+
+    return await readFile(outputPath);
+  } finally {
+    try {
+      await unlink(inputPath);
+      await unlink(outputPath);
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
+}
+
+/**
  * Escape special characters for FFmpeg drawtext filter
  */
 function escapeFFmpegText(text: string): string {

@@ -5,6 +5,7 @@ import { getCachedImage } from "@/lib/gemini";
 import { formatOverlayText } from "@/lib/widget-image";
 import { generateWeatherPlaceholderPng } from "@/lib/placeholder";
 import { triggerVideoGeneration } from "@/lib/widget-job";
+import { addOverlayToImage } from "@/lib/ffmpeg";
 
 /**
  * GET /cities/{city}?token=xxx
@@ -91,7 +92,7 @@ export async function GET(
       }
     }
 
-    // 6. If we have a static image, serve it and trigger video generation
+    // 6. If we have a static image, add overlay and serve it
     if (cached?.image_url) {
       // Trigger video generation in background (deduped - won't create duplicate jobs)
       triggerVideoGeneration(apiKey, city).catch((error) => {
@@ -101,8 +102,13 @@ export async function GET(
       try {
         const imageResponse = await fetch(cached.image_url);
         if (imageResponse.ok) {
-          const imageBuffer = await imageResponse.arrayBuffer();
-          return new NextResponse(imageBuffer, {
+          const rawImageBuffer = await imageResponse.arrayBuffer();
+          // Add weather overlay to the image
+          const imageWithOverlay = await addOverlayToImage(
+            Buffer.from(rawImageBuffer),
+            overlayText
+          );
+          return new NextResponse(new Uint8Array(imageWithOverlay), {
             status: 200,
             headers: {
               "Content-Type": "image/png",
@@ -115,7 +121,7 @@ export async function GET(
           });
         }
       } catch (imageFetchError) {
-        console.error("Failed to fetch static image:", imageFetchError);
+        console.error("Failed to fetch/process static image:", imageFetchError);
         // Fall through to placeholder
       }
     }
