@@ -1,15 +1,17 @@
 import { createBoomerangMp4 } from "@/lib/ffmpeg";
 import { supabase, STORAGE_BUCKET } from "@/lib/supabase";
-import { normalizeCity } from "@/lib/weather";
+import { normalizeCity, WeatherData } from "@/lib/weather";
 import { WeatherCategory } from "@/lib/weather-categories";
 import { TimeOfDay } from "@/lib/supabase";
 import { updateAnimationStatus } from "@/lib/gemini";
+import { formatOverlayText } from "@/lib/widget-image";
 
 export async function processVideoStep(
   city: string,
   weatherCategory: WeatherCategory,
   timeOfDay: TimeOfDay,
-  rawVideoBuffer: Buffer
+  rawVideoBuffer: Buffer,
+  weather: WeatherData
 ): Promise<string> {
   "use step";
 
@@ -19,8 +21,11 @@ export async function processVideoStep(
   await updateAnimationStatus(city, weatherCategory, timeOfDay, "processing");
 
   try {
-    // Create boomerang effect (forward + reverse) for seamless looping
-    const videoBuffer = await createBoomerangMp4(rawVideoBuffer);
+    // Format overlay text for the video
+    const overlayText = formatOverlayText(city, weather);
+
+    // Create boomerang effect (forward + reverse) with weather overlay
+    const videoBuffer = await createBoomerangMp4(rawVideoBuffer, overlayText);
 
     // Upload MP4 to Supabase Storage
     const mp4FileName = `${normalizedCity}/${weatherCategory}_${timeOfDay}.mp4`;

@@ -72,13 +72,14 @@ export async function cityVideoWorkflow(
       timeOfDay
     );
 
-    // Step 4: Process video (boomerang effect)
+    // Step 4: Process video (boomerang effect + weather overlay)
     await updateJobStageStep(jobId, "processing_video");
     const videoUrl = await processVideoStep(
       city,
       weather.category,
       timeOfDay,
-      rawVideoBuffer
+      rawVideoBuffer,
+      weather
     );
 
     // Complete job
