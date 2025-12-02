@@ -14,7 +14,8 @@ export type JobStage =
   | "fetching_weather"
   | "generating_image"
   | "generating_video"
-  | "processing_video";
+  | "processing_video"
+  | "generating_apng";
 
 export type JobType = "image" | "video";
 
@@ -22,10 +23,11 @@ export type JobType = "image" | "video";
  * Stage metadata for progress reporting
  */
 export const STAGE_INFO: Record<JobStage, { step: number; total: number; message: string }> = {
-  fetching_weather: { step: 1, total: 4, message: "Fetching weather data..." },
-  generating_image: { step: 2, total: 4, message: "Generating city image..." },
-  generating_video: { step: 3, total: 4, message: "Generating video animation..." },
-  processing_video: { step: 4, total: 4, message: "Processing video (adding loop)..." },
+  fetching_weather: { step: 1, total: 5, message: "Fetching weather data..." },
+  generating_image: { step: 2, total: 5, message: "Generating city image..." },
+  generating_video: { step: 3, total: 5, message: "Generating video animation..." },
+  processing_video: { step: 4, total: 5, message: "Processing video (adding loop)..." },
+  generating_apng: { step: 5, total: 5, message: "Generating widget image..." },
 };
 
 /**

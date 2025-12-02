@@ -6,19 +6,24 @@ import {
   getCachedWidgetImage,
   generateWeatherHash,
   formatOverlayText,
+  generateWidgetApng,
+  generateStaticImageWithOverlay,
 } from "@/lib/widget-image";
+import { generateWeatherPlaceholderPng } from "@/lib/placeholder";
 import { triggerVideoGeneration } from "@/lib/widget-job";
+import { checkFfmpegAvailable } from "@/lib/ffmpeg";
 
 /**
  * GET /cities/{city}.png?token=xxx
  *
  * Returns an image of the city with weather overlay.
- * Progressive enhancement (no FFmpeg during request):
+ * Progressive enhancement - always returns binary image data, never redirects:
  * 1. Cached APNG (animated) - best quality, instant
- * 2. Redirect to static image - fallback when APNG not ready
- * 3. 202 JSON response - when nothing cached, triggers generation
+ * 2. Video exists - generate APNG on-the-fly, cache, return
+ * 3. Static image exists - return PNG with weather overlay
+ * 4. Nothing cached - return placeholder with weather overlay
  *
- * Suitable for iOS widgets.
+ * Suitable for iOS widgets (stable URL, always returns image).
  */
 export async function GET(
   request: NextRequest,
@@ -79,80 +84,129 @@ export async function GET(
     const weather = await getWeatherForCity(city);
     const timeOfDay = weather.isDay ? "day" : "night";
     const weatherHash = generateWeatherHash(weather);
+    const overlayText = formatOverlayText(city, weather);
 
     // 4. Check for cached APNG first (best quality, instant response)
     const cachedWidget = await getCachedWidgetImage(city, weatherHash);
     if (cachedWidget) {
-      const apngResponse = await fetch(cachedWidget.apng_url);
-      if (apngResponse.ok) {
-        const apngBuffer = await apngResponse.arrayBuffer();
-        return new NextResponse(apngBuffer, {
-          status: 200,
-          headers: {
-            "Content-Type": "image/apng",
-            "Cache-Control": "public, max-age=1800, stale-while-revalidate=3600",
-            "X-Weather-Hash": weatherHash,
-            "X-Cached": "true",
-            "X-Image-Type": "apng",
-          },
-        });
+      try {
+        const apngResponse = await fetch(cachedWidget.apng_url);
+        if (apngResponse.ok) {
+          const apngBuffer = await apngResponse.arrayBuffer();
+          return new NextResponse(apngBuffer, {
+            status: 200,
+            headers: {
+              "Content-Type": "image/apng",
+              "Cache-Control": "public, max-age=1800, stale-while-revalidate=3600",
+              "X-Weather-Hash": weatherHash,
+              "X-Cached": "true",
+              "X-Image-Type": "apng",
+            },
+          });
+        }
+      } catch (fetchError) {
+        console.error("Failed to fetch cached APNG:", fetchError);
+        // Continue to fallback options
       }
     }
 
     // 5. Check for cached city image/video
     const cached = await getCachedImage(city, weather.category, timeOfDay);
-    const imageUrl = cached?.image_url || null;
 
-    // 6. If we have a static image, redirect to it (no FFmpeg needed)
-    // Video generation will create the APNG in the background
-    if (imageUrl) {
+    // 6. If we have a video, generate APNG on-the-fly and cache it
+    if (cached?.video_url) {
+      try {
+        const apngUrl = await generateWidgetApng(city, weather, cached.video_url);
+        // Fetch and return the newly generated APNG
+        const apngResponse = await fetch(apngUrl);
+        if (apngResponse.ok) {
+          const apngBuffer = await apngResponse.arrayBuffer();
+          return new NextResponse(apngBuffer, {
+            status: 200,
+            headers: {
+              "Content-Type": "image/apng",
+              "Cache-Control": "public, max-age=1800, stale-while-revalidate=3600",
+              "X-Weather-Hash": weatherHash,
+              "X-Cached": "false",
+              "X-Image-Type": "apng",
+            },
+          });
+        }
+      } catch (apngError) {
+        console.error("Failed to generate APNG on-the-fly:", apngError);
+        // Fall through to static image
+      }
+    }
+
+    // 7. If we have a static image, return it with weather overlay
+    if (cached?.image_url) {
       // Trigger video/APNG generation in background (deduped - won't create duplicate jobs)
       triggerVideoGeneration(apiKey, city).catch((error) => {
         console.error("Failed to trigger video generation:", error);
       });
 
-      // Redirect to the static image
-      return NextResponse.redirect(imageUrl, {
-        status: 302,
-        headers: {
-          "Cache-Control": "public, max-age=60",
-          "X-Image-Type": "static-redirect",
-          "X-Generating": "true",
-        },
-      });
-    }
-
-    // 7. Nothing cached - trigger full generation (deduped - won't create duplicate jobs)
-    let jobInfo: { jobId: string; alreadyProcessing: boolean } | null = null;
-    try {
-      jobInfo = await triggerVideoGeneration(apiKey, city);
-    } catch (error) {
-      console.error("Failed to trigger generation:", error);
-    }
-
-    // Return JSON with overlay info (no FFmpeg placeholder)
-    return new NextResponse(
-      JSON.stringify({
-        status: "generating",
-        city: city,
-        message: jobInfo?.alreadyProcessing
-          ? "Image generation already in progress. Please retry in 2 minutes."
-          : "Image is being generated. Please retry in 2 minutes.",
-        overlay: formatOverlayText(city, weather),
-        job_id: jobInfo?.jobId,
-        already_processing: jobInfo?.alreadyProcessing || false,
-      }),
-      {
-        status: 202,
-        headers: {
-          "Content-Type": "application/json",
-          "Retry-After": "120",
-          "X-Status": "generating",
-          "X-City": city,
-          ...(jobInfo?.jobId && { "X-Job-Id": jobInfo.jobId }),
-        },
+      // Check if FFmpeg is available for overlay
+      const ffmpegAvailable = await checkFfmpegAvailable();
+      if (ffmpegAvailable) {
+        try {
+          const pngBuffer = await generateStaticImageWithOverlay(cached.image_url, overlayText);
+          return new NextResponse(new Uint8Array(pngBuffer), {
+            status: 200,
+            headers: {
+              "Content-Type": "image/png",
+              "Cache-Control": "public, max-age=60",
+              "X-Weather-Hash": weatherHash,
+              "X-Cached": "true",
+              "X-Image-Type": "static-overlay",
+              "X-Generating": "true",
+            },
+          });
+        } catch (overlayError) {
+          console.error("Failed to add overlay to static image:", overlayError);
+          // Fall through to fetch image without overlay
+        }
       }
-    );
+
+      // FFmpeg not available or overlay failed - return the raw image
+      try {
+        const imageResponse = await fetch(cached.image_url);
+        if (imageResponse.ok) {
+          const imageBuffer = await imageResponse.arrayBuffer();
+          return new NextResponse(imageBuffer, {
+            status: 200,
+            headers: {
+              "Content-Type": "image/png",
+              "Cache-Control": "public, max-age=60",
+              "X-Weather-Hash": weatherHash,
+              "X-Cached": "true",
+              "X-Image-Type": "static-raw",
+              "X-Generating": "true",
+            },
+          });
+        }
+      } catch (fetchError) {
+        console.error("Failed to fetch static image:", fetchError);
+      }
+    }
+
+    // 8. Nothing cached - trigger full generation and return placeholder
+    triggerVideoGeneration(apiKey, city).catch((error) => {
+      console.error("Failed to trigger generation:", error);
+    });
+
+    // Generate placeholder with weather overlay
+    const placeholderBuffer = await generateWeatherPlaceholderPng(overlayText);
+    return new NextResponse(new Uint8Array(placeholderBuffer), {
+      status: 200,
+      headers: {
+        "Content-Type": "image/png",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "X-Weather-Hash": weatherHash,
+        "X-Cached": "false",
+        "X-Image-Type": "placeholder",
+        "X-Generating": "true",
+      },
+    });
   } catch (error) {
     console.error("Widget endpoint error:", error);
 
