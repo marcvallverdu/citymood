@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateTokenFromQuery } from "@/lib/auth";
 import { getWeatherForCity } from "@/lib/weather";
 import { getCachedImage } from "@/lib/gemini";
-import { formatOverlayText } from "@/lib/widget-image";
+import {
+  formatOverlayText,
+  generateWeatherHash,
+  getCachedOverlaidVideo,
+  cacheOverlaidVideo,
+} from "@/lib/widget-image";
 import { generateWeatherPlaceholderPng } from "@/lib/placeholder";
 import { triggerVideoGeneration } from "@/lib/widget-job";
-import { addOverlayToImage } from "@/lib/ffmpeg";
+import { addOverlayToImage, addOverlayToVideo } from "@/lib/ffmpeg";
 
 /**
  * GET /cities/{city}?token=xxx
@@ -69,13 +74,49 @@ export async function GET(
     // 4. Check for cached city image/video
     const cached = await getCachedImage(city, weather.category, timeOfDay);
 
-    // 5. If we have a video, serve MP4 directly (best quality)
+    // 5. If we have a video, add overlay dynamically (cached by weather hash)
     if (cached?.video_url) {
+      const weatherHash = generateWeatherHash(weather);
+
+      // Check for cached overlaid video first
+      const cachedOverlaidUrl = await getCachedOverlaidVideo(city, weatherHash);
+      if (cachedOverlaidUrl) {
+        try {
+          const videoResponse = await fetch(cachedOverlaidUrl);
+          if (videoResponse.ok) {
+            const videoBuffer = await videoResponse.arrayBuffer();
+            return new NextResponse(videoBuffer, {
+              status: 200,
+              headers: {
+                "Content-Type": "video/mp4",
+                "Cache-Control": "public, max-age=1800, stale-while-revalidate=3600",
+                "X-City": city,
+                "X-Weather": weather.category,
+                "X-Content-Type": "video",
+                "X-Cached-Overlay": "true",
+              },
+            });
+          }
+        } catch (fetchError) {
+          console.error("Failed to fetch cached overlaid video:", fetchError);
+          // Fall through to regenerate overlay
+        }
+      }
+
+      // No cached overlay - fetch raw video, add overlay, cache result
       try {
         const videoResponse = await fetch(cached.video_url);
         if (videoResponse.ok) {
-          const videoBuffer = await videoResponse.arrayBuffer();
-          return new NextResponse(videoBuffer, {
+          const rawVideoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
+          // Add overlay to video (this takes ~5-10 seconds)
+          const overlaidVideoBuffer = await addOverlayToVideo(rawVideoBuffer, overlayText);
+
+          // Cache the overlaid video for future requests
+          const overlaidUrl = await cacheOverlaidVideo(city, weatherHash, overlaidVideoBuffer);
+          console.log(`Cached overlaid video for ${city} at ${overlaidUrl}`);
+
+          return new NextResponse(new Uint8Array(overlaidVideoBuffer), {
             status: 200,
             headers: {
               "Content-Type": "video/mp4",
@@ -83,11 +124,12 @@ export async function GET(
               "X-City": city,
               "X-Weather": weather.category,
               "X-Content-Type": "video",
+              "X-Cached-Overlay": "false",
             },
           });
         }
       } catch (videoFetchError) {
-        console.error("Failed to fetch video:", videoFetchError);
+        console.error("Failed to fetch/process video:", videoFetchError);
         // Fall through to static image
       }
     }

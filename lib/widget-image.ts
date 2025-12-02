@@ -81,6 +81,73 @@ export async function cacheWidgetImage(
 }
 
 /**
+ * Get cached overlaid video URL for a city and weather hash
+ * Returns null if not cached or expired
+ */
+export async function getCachedOverlaidVideo(
+  city: string,
+  weatherHash: string
+): Promise<string | null> {
+  const normalizedCity = normalizeCity(city);
+
+  const { data } = await supabase
+    .from("widget_cache")
+    .select("apng_url")
+    .eq("city", normalizedCity)
+    .eq("weather_hash", weatherHash)
+    .gt("expires_at", new Date().toISOString())
+    .single<{ apng_url: string }>();
+
+  return data?.apng_url || null;
+}
+
+/**
+ * Cache an overlaid video and return the public URL
+ */
+export async function cacheOverlaidVideo(
+  city: string,
+  weatherHash: string,
+  videoBuffer: Buffer
+): Promise<string> {
+  const normalizedCity = normalizeCity(city);
+
+  // Upload to Supabase Storage
+  const fileName = `widgets/${normalizedCity}/${weatherHash}.mp4`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .upload(fileName, videoBuffer, {
+      contentType: "video/mp4",
+      upsert: true,
+    });
+
+  if (uploadError) {
+    throw new Error(`Failed to upload overlaid video: ${uploadError.message}`);
+  }
+
+  // Get public URL
+  const {
+    data: { publicUrl },
+  } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(fileName);
+
+  // Cache the result in widget_cache (reusing apng_url column for video URL)
+  const expiresAt = new Date(Date.now() + CACHE_DURATION_MS).toISOString();
+  await supabase.from("widget_cache").upsert(
+    {
+      city: normalizedCity,
+      weather_hash: weatherHash,
+      apng_url: publicUrl, // Reusing this column for overlaid video URL
+      expires_at: expiresAt,
+    },
+    {
+      onConflict: "city,weather_hash",
+    }
+  );
+
+  return publicUrl;
+}
+
+/**
  * Generate and cache a widget APNG from an MP4 video
  */
 export async function generateWidgetApng(
