@@ -146,6 +146,20 @@ export default function DashboardContent() {
         )}
       </div>
 
+      {/* Quick Links */}
+      {adminKey && (
+        <div className="flex gap-4">
+          <Link
+            href="/admin/gallery"
+            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+          >
+            <span>🖼️</span>
+            <span className="font-medium">Media Gallery</span>
+            <span className="text-gray-500 text-sm">View & manage all cached images</span>
+          </Link>
+        </div>
+      )}
+
       {/* Error State */}
       {error && (
         <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
