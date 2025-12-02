@@ -36,6 +36,7 @@ with the existing job_id so you can continue polling it.
 | `/city-image/:jobId` | GET | Check image generation status |
 | `/city-video` | POST | Generate animated video for a city's weather |
 | `/city-video/:jobId` | GET | Check video generation status |
+| `/cities/{city}.png` | GET | Get animated PNG for iOS widgets (see Widget Endpoint) |
 
 ---
 
@@ -393,6 +394,89 @@ curl https://citymood-production.up.railway.app/api/v1/city-video/job_abc123xyz 
     "request_id": "550e8400-e29b-41d4-a716-446655440003"
   }
 }
+```
+
+---
+
+### Widget Endpoint (iOS)
+
+**GET** `/cities/{city}.png?token=YOUR_API_KEY`
+
+Returns an animated PNG (APNG) of a city with a weather overlay, designed for iOS widgets.
+Unlike other endpoints, this uses query parameter authentication (suitable for image URLs).
+
+**Note:** This endpoint is outside the `/api/v1` path. Use the full URL format.
+
+#### Query Parameters
+
+| Parameter | Type   | Required | Description                                    |
+| --------- | ------ | -------- | ---------------------------------------------- |
+| token     | string | Yes      | Your API key (same as used in Bearer auth)     |
+
+#### Example Request
+
+```bash
+curl "https://citymood-production.up.railway.app/cities/london.png?token=YOUR_API_KEY" \
+  --output london-widget.apng
+```
+
+#### Response (200 OK - Success)
+
+Returns an animated PNG file with:
+- 360x360 resolution
+- Weather overlay at bottom: "London • 22°C • Sunny"
+- Frosted semi-transparent background bar
+- Infinite loop animation
+
+**Headers:**
+```
+Content-Type: image/apng
+Cache-Control: public, max-age=1800, stale-while-revalidate=3600
+X-Weather-Hash: d2a8f7bf72c2
+X-Cached: true
+```
+
+#### Response (202 Accepted - Generating)
+
+If the video for the current weather conditions hasn't been generated yet:
+
+**Headers:**
+```
+Content-Type: image/png
+Retry-After: 120
+X-Status: generating
+X-City: london
+```
+
+Returns a placeholder PNG. Retry after ~2 minutes.
+
+#### Response (401 Unauthorized)
+
+```json
+{
+  "error": "Unauthorized",
+  "message": "Missing token parameter"
+}
+```
+
+#### Response (404 Not Found)
+
+```json
+{
+  "error": "City not found",
+  "message": "Could not find weather data for \"xyz\""
+}
+```
+
+#### iOS Widget Usage
+
+```swift
+let city = "london"
+let token = "YOUR_API_KEY"
+let imageURL = URL(string: "https://citymood-production.up.railway.app/cities/\(city).png?token=\(token)")!
+
+// Use in SwiftUI widget
+AsyncImage(url: imageURL)
 ```
 
 ---
