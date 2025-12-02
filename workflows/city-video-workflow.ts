@@ -2,7 +2,6 @@ import { fetchWeatherStep } from "./steps/fetch-weather";
 import { generateImageStep } from "./steps/generate-image";
 import { generateVideoStep } from "./steps/generate-video";
 import { processVideoStep } from "./steps/process-video";
-import { generateApngStep } from "./steps/generate-apng";
 import {
   startJobStep,
   updateJobStageStep,
@@ -81,15 +80,6 @@ export async function cityVideoWorkflow(
       timeOfDay,
       rawVideoBuffer
     );
-
-    // Step 5: Generate APNG with weather overlay for widget cache
-    await updateJobStageStep(jobId, "generating_apng");
-    try {
-      await generateApngStep(city, weather, videoUrl);
-    } catch (apngError) {
-      // APNG generation is not critical - log and continue
-      console.error(`[Job ${jobId}] Failed to generate APNG:`, apngError);
-    }
 
     // Complete job
     await completeVideoJobStep(jobId, videoUrl, weather, image.imageUrl);
