@@ -20,7 +20,7 @@ const FALLBACK_PLACEHOLDER = Buffer.from(
  */
 export async function generatePlaceholderPng(
   message: string = "Generating...",
-  size: number = 360
+  size: number = 720
 ): Promise<Buffer> {
   const ffmpegAvailable = await checkFfmpegAvailable();
 
@@ -66,7 +66,7 @@ let cachedPlaceholder: Buffer | null = null;
  */
 export async function getPlaceholderPng(): Promise<Buffer> {
   if (!cachedPlaceholder) {
-    cachedPlaceholder = await generatePlaceholderPng("Generating...", 360);
+    cachedPlaceholder = await generatePlaceholderPng("Generating...", 720);
   }
   return cachedPlaceholder;
 }

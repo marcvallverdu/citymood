@@ -60,6 +60,8 @@ export async function checkFfmpegAvailable(): Promise<boolean> {
 export interface ApngOptions {
   fps?: number;
   scale?: number;
+  fontSize?: number;
+  barHeight?: number;
 }
 
 /**
@@ -76,7 +78,7 @@ export async function convertMp4ToApngWithOverlay(
     throw new Error("FFmpeg is not available on this system");
   }
 
-  const { fps = 10, scale = 360 } = options;
+  const { fps = 10, scale = 720, fontSize = 32, barHeight = 80 } = options;
 
   const tempDir = await mkdtemp(join(tmpdir(), "citymood-apng-"));
   const inputPath = join(tempDir, "input.mp4");
@@ -88,15 +90,18 @@ export async function convertMp4ToApngWithOverlay(
     // Escape special characters in the overlay text for FFmpeg
     const escapedText = escapeFFmpegText(overlayText);
 
+    // Calculate text Y position (centered in the bar)
+    const textY = `h-${Math.round(barHeight / 2 + fontSize / 3)}`;
+
     // FFmpeg command to:
-    // 1. Scale to target size
+    // 1. Scale to target size (720p)
     // 2. Set framerate
     // 3. Draw a semi-transparent black box at the bottom (frosted effect)
     // 4. Draw white text with drop shadow centered in the box
     // 5. Output as APNG with infinite loop
-    const cmd = `ffmpeg -y -i "${inputPath}" -vf "fps=${fps},scale=${scale}:-1,drawbox=x=0:y=ih-60:w=iw:h=60:color=black@0.5:t=fill,drawtext=text='${escapedText}':fontsize=20:fontcolor=white:x=(w-text_w)/2:y=h-38:shadowcolor=black@0.7:shadowx=1:shadowy=1" -plays 0 "${outputPath}"`;
+    const cmd = `ffmpeg -y -i "${inputPath}" -vf "fps=${fps},scale=${scale}:-1,drawbox=x=0:y=ih-${barHeight}:w=iw:h=${barHeight}:color=black@0.5:t=fill,drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=white:x=(w-text_w)/2:y=${textY}:shadowcolor=black@0.7:shadowx=2:shadowy=2" -plays 0 "${outputPath}"`;
 
-    await execAsync(cmd, { maxBuffer: 50 * 1024 * 1024 }); // 50MB buffer for APNG output
+    await execAsync(cmd, { maxBuffer: 100 * 1024 * 1024 }); // 100MB buffer for larger APNG output
 
     return await readFile(outputPath);
   } finally {
