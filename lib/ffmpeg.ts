@@ -78,11 +78,14 @@ export async function convertMp4ToApngWithOverlay(
     throw new Error("FFmpeg is not available on this system");
   }
 
-  const { fps = 10, scale = 720, fontSize = 32, barHeight = 80 } = options;
+  // Keep 720p but use lower fps (6) to stay under Supabase 50MB limit
+  // 720p at 6fps with palettegen optimization produces ~20-40MB files
+  const { fps = 6, scale = 720, fontSize = 32, barHeight = 80 } = options;
 
   const tempDir = await mkdtemp(join(tmpdir(), "citymood-apng-"));
   const inputPath = join(tempDir, "input.mp4");
   const outputPath = join(tempDir, "output.apng");
+  const palettePath = join(tempDir, "palette.png");
 
   try {
     await writeFile(inputPath, mp4Buffer);
@@ -93,21 +96,25 @@ export async function convertMp4ToApngWithOverlay(
     // Calculate text Y position (centered in the bar)
     const textY = `h-${Math.round(barHeight / 2 + fontSize / 3)}`;
 
-    // FFmpeg command to:
-    // 1. Scale to target size (720p)
-    // 2. Set framerate
-    // 3. Draw a semi-transparent black box at the bottom (frosted effect)
-    // 4. Draw white text with drop shadow centered in the box
-    // 5. Output as APNG with infinite loop
-    const cmd = `ffmpeg -y -i "${inputPath}" -vf "fps=${fps},scale=${scale}:-1,drawbox=x=0:y=ih-${barHeight}:w=iw:h=${barHeight}:color=black@0.5:t=fill,drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=white:x=(w-text_w)/2:y=${textY}:shadowcolor=black@0.7:shadowx=2:shadowy=2" -plays 0 "${outputPath}"`;
+    // FFmpeg command using two-pass palette generation for smaller file size:
+    // Pass 1: Generate optimal palette from the video
+    // Pass 2: Apply palette to create optimized APNG
+    const filters = `fps=${fps},scale=${scale}:-1,drawbox=x=0:y=ih-${barHeight}:w=iw:h=${barHeight}:color=black@0.5:t=fill,drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=white:x=(w-text_w)/2:y=${textY}:shadowcolor=black@0.7:shadowx=2:shadowy=2`;
 
-    await execAsync(cmd, { maxBuffer: 100 * 1024 * 1024 }); // 100MB buffer for larger APNG output
+    // Generate palette
+    const paletteCmd = `ffmpeg -y -i "${inputPath}" -vf "${filters},palettegen=max_colors=128:stats_mode=diff" "${palettePath}"`;
+    await execAsync(paletteCmd, { maxBuffer: 50 * 1024 * 1024 });
+
+    // Apply palette and create APNG
+    const apngCmd = `ffmpeg -y -i "${inputPath}" -i "${palettePath}" -lavfi "${filters}[v];[v][1:v]paletteuse=dither=bayer:bayer_scale=3" -plays 0 "${outputPath}"`;
+    await execAsync(apngCmd, { maxBuffer: 100 * 1024 * 1024 });
 
     return await readFile(outputPath);
   } finally {
     try {
       await unlink(inputPath);
       await unlink(outputPath);
+      await unlink(palettePath);
     } catch {
       // Ignore cleanup errors
     }
